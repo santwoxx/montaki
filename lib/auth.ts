@@ -7,8 +7,12 @@ import { prisma } from "@/lib/prisma";
 
 export const COOKIE_NAME = "sessao";
 
+// "||" (não "??"): uma SESSION_SECRET configurada como string vazia deve
+// cair no valor padrão igual a uma variável ausente -- com "??" ela passaria
+// direto, e assinar um JWT com chave de tamanho zero derruba o login (erro
+// "Zero-length key is not supported").
 const secret = new TextEncoder().encode(
-  process.env.SESSION_SECRET ?? "chave-de-desenvolvimento-insegura-troque-isso"
+  process.env.SESSION_SECRET || "chave-de-desenvolvimento-insegura-troque-isso"
 );
 
 export type Papel = "ADMIN" | "MONTADOR";

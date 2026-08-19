@@ -3,8 +3,10 @@ import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
 const COOKIE_NAME = "sessao";
+// "||" (não "??"): ver o mesmo comentário em lib/auth.ts -- precisa cair no
+// padrão também quando a variável existe mas está vazia.
 const secret = new TextEncoder().encode(
-  process.env.SESSION_SECRET ?? "chave-de-desenvolvimento-insegura-troque-isso"
+  process.env.SESSION_SECRET || "chave-de-desenvolvimento-insegura-troque-isso"
 );
 
 async function lerSessao(req: NextRequest) {

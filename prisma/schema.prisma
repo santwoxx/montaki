@@ -1,0 +1,154 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  MONTADOR
+}
+
+enum StatusMontagem {
+  PENDENTE
+  EM_ANDAMENTO
+  CONCLUIDO
+  CANCELADO
+}
+
+enum TipoOcorrencia {
+  CLIENTE_AUSENTE
+  PECA_DANIFICADA
+  REAGENDAR
+  OUTRO
+}
+
+model User {
+  id             String   @id @default(cuid())
+  nome           String
+  email          String   @unique
+  telefone       String?
+  fotoUrl        String?
+  senha          String
+  role           Role
+  ativo          Boolean  @default(true)
+  comissaoPadrao Float    @default(0)
+  createdAt      DateTime @default(now())
+
+  comissoes            ComissaoLoja[]
+  montagens            Montagem[]     @relation("MontagensDoMontador")
+  avaliacoes           Avaliacao[]
+  notasSugeridas       NotaPendente[] @relation("NotasSugeridasParaMontador")
+}
+
+model Loja {
+  id        String   @id @default(cuid())
+  nome      String
+  telefone  String?
+  endereco  String?
+  cnpj      String?  @unique
+  ativo     Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  comissoes ComissaoLoja[]
+  montagens Montagem[]
+}
+
+model ComissaoLoja {
+  id         String @id @default(cuid())
+  montadorId String
+  lojaId     String
+  percentual Float
+
+  montador User @relation(fields: [montadorId], references: [id], onDelete: Cascade)
+  loja     Loja @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+
+  @@unique([montadorId, lojaId])
+}
+
+model Montagem {
+  id                      String         @id @default(cuid())
+  numeroPedido            String?
+  lojaId                  String
+  montadorId              String?
+  clienteNome             String
+  clienteTelefone         String?
+  clienteEndereco         String
+  descricaoServico        String
+  valorServico            Float
+  percentualMontador      Float
+  valorMontador           Float
+  valorAssistencia        Float          @default(0)
+  feitoPorAdm             Boolean        @default(false)
+  dataAgendada            DateTime?
+  status                  StatusMontagem @default(PENDENTE)
+  pagoPelaLoja            Boolean        @default(false)
+  pagoAoMontador          Boolean        @default(false)
+  observacoes             String?
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+  concluidoEm             DateTime?
+  fotoProdutoUrl          String?
+  assinaturaMontador      String?
+  assinaturaCliente       String?
+  manualUrl               String?
+  manualNomeArquivo       String?
+  manualTipo              String?
+  notificadoCentralSyncEm DateTime?
+  avaliacaoSolicitadaEm   DateTime?
+
+  loja        Loja         @relation(fields: [lojaId], references: [id])
+  montador    User?        @relation("MontagensDoMontador", fields: [montadorId], references: [id], onDelete: SetNull)
+  avaliacao   Avaliacao?
+  ocorrencias Ocorrencia[]
+
+  @@index([status])
+  @@index([montadorId])
+  @@index([lojaId])
+  @@index([createdAt])
+}
+
+model NotaPendente {
+  id                 String    @id @default(cuid())
+  numeroPedido       String?
+  clienteNome        String
+  clienteTelefone    String?
+  clienteEndereco    String
+  descricaoServico   String
+  valorServico       Float?
+  dataAgendada       DateTime?
+  observacoes        String?
+  lojaNomeSugerida   String?
+  lojaCnpjSugerido   String?
+  fotoReferenciaUrl  String?
+  montadorSugeridoId String?
+  criadaEm           DateTime  @default(now())
+
+  montadorSugerido User? @relation("NotasSugeridasParaMontador", fields: [montadorSugeridoId], references: [id], onDelete: SetNull)
+}
+
+model Ocorrencia {
+  id         String         @id @default(cuid())
+  montagemId String
+  tipo       TipoOcorrencia
+  observacao String?
+  fotoUrl    String?
+  criadoEm   DateTime       @default(now())
+
+  montagem Montagem @relation(fields: [montagemId], references: [id], onDelete: Cascade)
+}
+
+model Avaliacao {
+  id          String   @id @default(cuid())
+  montagemId  String   @unique
+  montadorId  String
+  estrelas    Int
+  comentario  String?
+  criadoEm    DateTime @default(now())
+
+  montagem Montagem @relation(fields: [montagemId], references: [id], onDelete: Cascade)
+  montador User     @relation(fields: [montadorId], references: [id])
+}

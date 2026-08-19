@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { Badge, Button, Card, Field, Input, PageHeader, Select, StatCard, Vazio } from "@/components/ui";
 import { formatarData, formatarMoeda } from "@/lib/format";
-import type { Prisma } from "@/lib/mock-db/types";
+import type { Prisma } from "@/app/generated/prisma/client";
 
 function mesAtual() {
   const agora = new Date();

@@ -41,12 +41,18 @@ individual para cada montador.
 
 ## Como rodar o sistema no seu computador
 
-Pré-requisito: [Node.js](https://nodejs.org) instalado (versão 18 ou
-superior).
+Pré-requisitos:
+- [Node.js](https://nodejs.org) instalado (versão 18 ou superior).
+- Um banco Postgres na nuvem (gratuito). Recomendado:
+  [neon.com](https://neon.com) — crie um projeto e copie as duas strings de
+  conexão (pooled e direct) para o arquivo `.env`, nas variáveis
+  `DATABASE_URL` e `DIRECT_URL` (veja `.env.example`).
 
 ```bash
-npm install     # instala as dependências (só precisa fazer uma vez)
-npm run dev     # inicia o sistema
+npm install              # instala as dependências e gera o cliente do Prisma
+npx prisma migrate dev   # cria as tabelas no banco (só precisa fazer uma vez)
+npm run db:seed          # cria o usuário administrador
+npm run dev              # inicia o sistema
 ```
 
 Depois abra **http://localhost:3000** no navegador.
@@ -69,26 +75,27 @@ lojas, montadores ou montagens de exemplo), pronto para os dados reais.
 
 Ainda não há uma tela de "trocar senha" para o próprio administrador (os
 montadores têm a senha redefinida por ele, no painel). Para trocar a senha
-do admin agora, gere um novo hash e substitua o campo `senha` do usuário
-`admin-1` em `lib/mock-db/data.ts`:
+do admin agora, gere um novo hash e atualize o usuário no banco:
 
 ```bash
 node -e "console.log(require('bcryptjs').hashSync('SUA-NOVA-SENHA', 10))"
+npx prisma studio   # abre uma planilha visual do banco; cole o hash no campo "senha" do usuário
 ```
-
-Copie o hash impresso para o arquivo e reimplante o sistema.
 
 ## Sobre onde os dados ficam guardados
 
-Nesta implantação, os dados (montadores, lojas, montagens, comissões etc.)
-ficam guardados em memória no próprio servidor (arquivo
-`lib/mock-db/data.ts`, através de `lib/prisma.ts`) — não em um banco de
-dados externo. Isso quer dizer que os dados **somem a cada novo deploy ou
-reinício do servidor**. É suficiente para começar a usar e validar o
-sistema no dia a dia, mas para manter o histórico financeiro de forma
-permanente o próximo passo recomendado é conectar um banco Postgres real
-(ex: [neon.com](https://neon.com), gratuito) via Prisma no lugar do mock —
-`lib/prisma.ts` já foi escrito pensando nessa troca.
+Os dados (montadores, lojas, montagens, comissões etc.) ficam guardados num
+banco Postgres na nuvem (Neon), não em um arquivo local — assim o mesmo
+banco funciona tanto no seu computador quanto no site publicado na Vercel.
+Para visualizar/editar os dados diretamente (uma planilha visual), rode:
+
+```bash
+npx prisma studio
+```
+
+**Importante:** o provedor do banco (Neon) já cuida de backups automáticos,
+mas vale a pena checar as opções de backup do plano escolhido — é lá que
+fica todo o histórico financeiro da empresa.
 
 ## Integração com sistema externo (opcional)
 
@@ -102,11 +109,20 @@ funcionando normalmente — não é um recurso necessário para usar o sistema.
 ## Publicando o sistema no Vercel
 
 O deploy é feito subindo este projeto para o Vercel — pela CLI (`vercel`)
-ou conectando o repositório do GitHub. A variável `SESSION_SECRET` do
-`.env.example` precisa ser cadastrada nas "Environment Variables" do
-projeto no Vercel (gere uma com `openssl rand -base64 32`). Depois disso, o
-link gerado (ex: `montaki.vercel.app`) já funciona tanto para o admin
-quanto para os montadores, em qualquer dispositivo com internet.
+ou conectando o repositório do GitHub. As variáveis `DATABASE_URL`,
+`DIRECT_URL` e `SESSION_SECRET` do `.env.example` precisam ser cadastradas
+nas "Environment Variables" do projeto no Vercel (gere a `SESSION_SECRET`
+com `openssl rand -base64 32` — **não deixe em branco**, veja o aviso
+abaixo). O `npm install` do build já roda `prisma generate` automaticamente
+(script `postinstall` do `package.json`). Depois disso, o link gerado (ex:
+`montaki.vercel.app`) já funciona tanto para o admin quanto para os
+montadores, em qualquer dispositivo com internet.
+
+> **Atenção:** se `SESSION_SECRET` ficar vazia (variável criada mas sem
+> valor) ou ausente, o sistema cai num valor padrão inseguro escrito no
+> código-fonte — como este repositório é público, isso permitiria forjar um
+> login de administrador. Sempre configure um valor real gerado
+> aleatoriamente.
 
 ## Contato Montaki
 
@@ -115,8 +131,10 @@ quanto para os montadores, em qualquer dispositivo com internet.
 
 ## Estrutura do projeto (para referência técnica)
 
-- `lib/mock-db/` — dados em memória (usuários, lojas, comissões,
-  montagens) e o cliente que imita a API do Prisma.
+- `prisma/schema.prisma` — modelo do banco de dados (usuários, lojas,
+  comissões, montagens).
+- `prisma/seed.ts` — cria o usuário administrador (`npm run db:seed`).
+- `lib/prisma.ts` — cliente do Prisma (conecta usando `DATABASE_URL`).
 - `lib/auth.ts` — login, sessão e proteção de acesso por papel (admin/montador).
 - `lib/actions/` — as ações do sistema (login, criar montador, criar
   montagem, marcar pagamento, etc).

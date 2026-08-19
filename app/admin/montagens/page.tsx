@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { Badge, Button, Card, LinkButton, PageHeader, Select, Vazio } from "@/components/ui";
 import { formatarData, formatarMoeda, STATUS_COLOR, STATUS_LABEL } from "@/lib/format";
-import type { Prisma, StatusMontagem } from "@/lib/mock-db/types";
+import type { Prisma, StatusMontagem } from "@/app/generated/prisma/client";
 
 export default async function MontagensPage({
   searchParams,

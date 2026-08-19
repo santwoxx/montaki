@@ -153,7 +153,19 @@ export async function salvarComissoesAction(montadorId: string, formData: FormDa
 export async function excluirMontadorAction(id: string) {
   await requireAdmin();
 
-  await prisma.user.delete({ where: { id } });
+  try {
+    await prisma.user.delete({ where: { id } });
+  } catch (error) {
+    const codigo = (error as { code?: string })?.code;
+    if (codigo === "P2003" || codigo === "P2014") {
+      redirect(
+        `/admin/montadores?erro=${encodeURIComponent(
+          "Esse montador já tem avaliações registradas e não pode ser excluído. Desative-o em vez disso."
+        )}`
+      );
+    }
+    throw error;
+  }
 
   revalidatePath("/admin/montadores");
   revalidatePath("/admin/montagens");

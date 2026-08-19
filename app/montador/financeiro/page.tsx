@@ -2,7 +2,7 @@ import { requireMontador } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Badge, Card, Field, Input, PageHeader, Select, StatCard, Vazio } from "@/components/ui";
 import { formatarData, formatarMoeda } from "@/lib/format";
-import type { Prisma } from "@/lib/mock-db/types";
+import type { Prisma } from "@/app/generated/prisma/client";
 
 function mesAtual() {
   const agora = new Date();

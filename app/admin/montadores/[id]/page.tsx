@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import {
   atualizarMontadorAction,
   salvarComissoesAction,
@@ -34,48 +34,76 @@ export default async function MontadorDetalhePage({
   const { erro, sucesso } = await searchParams;
 
   const [
-    montador,
-    lojas,
-    comissoes,
-    montagensRecentes,
-    ganhos,
-    totalMontagens,
-    avaliacaoAgg,
-    avaliacoesRecentes,
+    montadorDoc,
+    lojasSnapshot,
+    comissoesSnapshot,
+    montagensSnapshot,
+    avaliacoesSnapshot,
   ] = await Promise.all([
-    prisma.user.findUnique({ where: { id, role: "MONTADOR" } }),
-    prisma.loja.findMany({ where: { ativo: true }, orderBy: { nome: "asc" } }),
-    prisma.comissaoLoja.findMany({ where: { montadorId: id } }),
-    prisma.montagem.findMany({
-      where: { montadorId: id },
-      orderBy: { createdAt: "desc" },
-      take: 8,
-      include: { loja: true },
-    }),
-    prisma.montagem.aggregate({
-      _sum: { valorMontador: true },
-      where: { montadorId: id, status: "CONCLUIDO", pagoAoMontador: false },
-    }),
-    prisma.montagem.count({ where: { montadorId: id } }),
-    prisma.avaliacao.aggregate({
-      _avg: { estrelas: true },
-      _count: { _all: true },
-      where: { montadorId: id },
-    }),
-    prisma.avaliacao.findMany({
-      where: { montadorId: id },
-      orderBy: { criadoEm: "desc" },
-      take: 10,
-      include: { montagem: { select: { clienteNome: true } } },
-    }),
+    adminDb.collection("users").doc(id).get(),
+    adminDb.collection("lojas").where("ativo", "==", true).orderBy("nome", "asc").get(),
+    adminDb.collection("comissoesLoja").where("montadorId", "==", id).get(),
+    adminDb.collection("montagens").where("montadorId", "==", id).get(),
+    adminDb.collection("avaliacoes").where("montadorId", "==", id).get(),
   ]);
 
-  if (!montador) notFound();
+  if (!montadorDoc.exists || montadorDoc.data()?.role !== "MONTADOR") {
+    notFound();
+  }
 
-  const mediaAvaliacao = avaliacaoAgg._avg.estrelas ?? 0;
-  const totalAvaliacoes = avaliacaoAgg._count._all;
+  const montador = { id: montadorDoc.id, ...montadorDoc.data() as any };
+  
+  const lojas = lojasSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+  const lojasMap = new Map();
+  lojas.forEach(l => lojasMap.set(l.id, l));
 
-  const comissaoPorLoja = new Map(comissoes.map((c) => [c.lojaId, c.percentual]));
+  const comissoes = comissoesSnapshot.docs.map(doc => doc.data());
+  const comissaoPorLoja = new Map(comissoes.map((c: any) => [c.lojaId, c.percentual]));
+
+  const rawMontagens = montagensSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+  
+  // Sort montagens in memory
+  rawMontagens.sort((a, b) => {
+    const timeA = a.criadoEm?.toMillis() || 0;
+    const timeB = b.criadoEm?.toMillis() || 0;
+    return timeB - timeA;
+  });
+
+  const totalMontagens = rawMontagens.length;
+  
+  const ganhosPendentes = rawMontagens
+    .filter(m => m.status === "CONCLUIDO" && !m.pagoAoMontador)
+    .reduce((soma, m) => soma + (m.valorMontador || 0), 0);
+
+  const montagensRecentes = rawMontagens.slice(0, 8).map(m => ({
+    ...m,
+    loja: lojasMap.get(m.lojaId) || { nome: "Loja Excluída" },
+    createdAt: m.criadoEm?.toDate() || new Date(0)
+  }));
+
+  const rawAvaliacoes = avaliacoesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+  
+  const totalAvaliacoes = rawAvaliacoes.length;
+  const mediaAvaliacao = totalAvaliacoes > 0 
+    ? rawAvaliacoes.reduce((soma, a) => soma + (a.estrelas || 0), 0) / totalAvaliacoes 
+    : 0;
+
+  // Sort avaliacoes in memory
+  rawAvaliacoes.sort((a, b) => {
+    const timeA = a.criadoEm?.toMillis() || 0;
+    const timeB = b.criadoEm?.toMillis() || 0;
+    return timeB - timeA;
+  });
+
+  // For avaliacoes recentes, we need the clienteNome from montagem
+  const avaliacoesRecentes = rawAvaliacoes.slice(0, 10).map(a => {
+    const m = rawMontagens.find(mont => mont.id === a.montagemId);
+    return {
+      ...a,
+      criadoEm: a.criadoEm?.toDate() || new Date(0),
+      montagem: { clienteNome: m ? m.clienteNome : "Desconhecido" }
+    };
+  });
 
   return (
     <div>
@@ -116,7 +144,7 @@ export default async function MontadorDetalhePage({
       <div className="mb-8 grid gap-4 sm:grid-cols-2">
         <StatCard
           titulo="Comissão pendente de pagamento"
-          valor={formatarMoeda(ganhos._sum.valorMontador)}
+          valor={formatarMoeda(ganhosPendentes)}
           cor="text-amber-600"
           sub="Referente a montagens já concluídas"
         />
@@ -268,8 +296,8 @@ export default async function MontadorDetalhePage({
                       </p>
                       <p className="text-xs text-slate-400">{formatarData(m.createdAt)}</p>
                     </div>
-                    <Badge className={STATUS_COLOR[m.status]}>
-                      {STATUS_LABEL[m.status]}
+                    <Badge className={STATUS_COLOR[m.status as keyof typeof STATUS_COLOR]}>
+                      {STATUS_LABEL[m.status as keyof typeof STATUS_LABEL]}
                     </Badge>
                   </div>
                 </Card>

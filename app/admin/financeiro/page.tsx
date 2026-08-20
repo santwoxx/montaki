@@ -1,8 +1,7 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import { Badge, Button, Card, Field, Input, PageHeader, Select, StatCard, Vazio } from "@/components/ui";
 import { formatarData, formatarMoeda } from "@/lib/format";
-import type { Prisma } from "@/app/generated/prisma/client";
 
 function mesAtual() {
   const agora = new Date();
@@ -23,33 +22,56 @@ export default async function FinanceiroPage({
   const inicio = new Date(ano, (mesNumero || 1) - 1, 1);
   const fim = new Date(ano, mesNumero || 1, 1);
 
-  const [lojas, montadores] = await Promise.all([
-    prisma.loja.findMany({ orderBy: { nome: "asc" } }),
-    prisma.user.findMany({ where: { role: "MONTADOR" }, orderBy: { nome: "asc" } }),
+  const [lojasSnapshot, montadoresSnapshot] = await Promise.all([
+    adminDb.collection("lojas").orderBy("nome", "asc").get(),
+    adminDb.collection("users").where("role", "==", "MONTADOR").orderBy("nome", "asc").get(),
   ]);
 
-  const where: Prisma.MontagemWhereInput = {
-    status: { not: "CANCELADO" },
-    createdAt: { gte: inicio, lt: fim },
-  };
-  if (lojaId) where.lojaId = lojaId;
-  if (montadorId) where.montadorId = montadorId;
+  const lojas = lojasSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+  const montadores = montadoresSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
 
-  const montagens = await prisma.montagem.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    include: { loja: true, montador: true },
+  const lojasMap = new Map();
+  lojas.forEach(l => lojasMap.set(l.id, l));
+
+  const montadoresMap = new Map();
+  montadores.forEach(m => montadoresMap.set(m.id, m));
+
+  let query: FirebaseFirestore.Query = adminDb.collection("montagens")
+    .where("criadoEm", ">=", inicio)
+    .where("criadoEm", "<", fim);
+
+  if (lojaId) query = query.where("lojaId", "==", lojaId);
+  if (montadorId) query = query.where("montadorId", "==", montadorId);
+
+  const montagensSnapshot = await query.get();
+  
+  let rawMontagens = montagensSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+  
+  // Filter out cancelado and sort in memory
+  rawMontagens = rawMontagens.filter(m => m.status !== "CANCELADO");
+  
+  rawMontagens.sort((a, b) => {
+    const timeA = a.criadoEm?.toMillis() || 0;
+    const timeB = b.criadoEm?.toMillis() || 0;
+    return timeB - timeA;
   });
 
+  const montagens = rawMontagens.map(m => ({
+    ...m,
+    loja: lojasMap.get(m.lojaId) || { nome: "Loja Excluída" },
+    montador: montadoresMap.get(m.montadorId) || null,
+    createdAt: m.criadoEm?.toDate() || new Date(0)
+  }));
+
   const totalServico = montagens.reduce((soma, m) => soma + (m.valorServico * 0.08) + (m.valorAssistencia || 0), 0);
-  const totalMontador = montagens.reduce((soma, m) => soma + m.valorMontador, 0);
+  const totalMontador = montagens.reduce((soma, m) => soma + (m.valorMontador || 0), 0);
   const totalEmpresa = totalServico - totalMontador;
   const totalPendenteLoja = montagens
     .filter((m) => !m.pagoPelaLoja)
     .reduce((soma, m) => soma + (m.valorServico * 0.08) + (m.valorAssistencia || 0), 0);
   const totalPendenteMontador = montagens
     .filter((m) => !m.pagoAoMontador)
-    .reduce((soma, m) => soma + m.valorMontador, 0);
+    .reduce((soma, m) => soma + (m.valorMontador || 0), 0);
 
   return (
     <div>

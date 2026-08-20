@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,12 +12,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Buscar as montagens no banco para calcular o valor total
-    const montagens = await prisma.montagem.findMany({
-      where: {
-        id: { in: montagensIds },
-      },
-    });
+    // Buscar as montagens no banco Firestore
+    const montagensRef = adminDb.collection("montagens");
+    
+    // Firestore "in" query limits to 10 elements. If more than 10, needs chunking.
+    // For simplicity, assuming montagensIds is <= 10 or we fetch them individually.
+    const montagensDocs = await Promise.all(
+      montagensIds.map(id => montagensRef.doc(id).get())
+    );
+
+    const montagens = montagensDocs.filter(doc => doc.exists).map(doc => ({ id: doc.id, ...doc.data() } as any));
 
     if (montagens.length !== montagensIds.length) {
       return NextResponse.json(
@@ -26,27 +30,28 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Calcula o valor total do orçamento com base no valorServico das montagens
-    const total = montagens.reduce((acc, curr) => acc + curr.valorServico, 0);
-
-    // Usa o nome e telefone do primeiro cliente como padrão para o orçamento,
-    // se o administrador quiser gerar um orçamento único para esse cliente
+    const total = montagens.reduce((acc, curr) => acc + (curr.valorServico || 0), 0);
     const cliente = montagens[0].clienteNome;
     const telefone = montagens[0].clienteTelefone;
 
-    // Cria o orçamento e vincula as montagens
-    const orcamento = await prisma.orcamento.create({
-      data: {
-        total,
-        cliente,
-        telefone,
-        montagens: {
-          connect: montagensIds.map((id) => ({ id })),
-        },
-      },
+    // Criar orcamento
+    const orcamentosRef = adminDb.collection("orcamentos");
+    const orcamentoDoc = await orcamentosRef.add({
+      total,
+      cliente,
+      telefone,
+      status: "PENDENTE",
+      criadoEm: new Date(),
     });
 
-    return NextResponse.json({ orcamentoId: orcamento.id }, { status: 201 });
+    // Vincular montagens ao orcamento (Transaction ou Batch)
+    const batch = adminDb.batch();
+    montagensIds.forEach((id) => {
+      batch.update(montagensRef.doc(id), { orcamentoId: orcamentoDoc.id });
+    });
+    await batch.commit();
+
+    return NextResponse.json({ orcamentoId: orcamentoDoc.id }, { status: 201 });
   } catch (error) {
     console.error("Erro ao criar orçamento:", error);
     return NextResponse.json(

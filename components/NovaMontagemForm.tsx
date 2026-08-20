@@ -7,6 +7,7 @@ import { ImportarNotaCard } from "@/components/ImportarNotaCard";
 import { NotasPendentesCard, type NotaPendenteResumo } from "@/components/NotasPendentesCard";
 import { resolverOuCriarLojaAction, type ResultadoResolucaoLoja } from "@/lib/actions/importar";
 import { formatarMoeda, paraInputDate, paraNumeroBr } from "@/lib/format";
+import { tabelaPrecos } from "@/lib/tabelaPrecos";
 
 type Loja = { id: string; nome: string };
 type Montador = { id: string; nome: string; comissaoPadrao?: number };
@@ -139,6 +140,21 @@ export function NovaMontagemForm({
     const p = paraNumeroBr(percentual) || 0;
     return (valorServicoCalculado * p) / 100;
   }, [valorServicoCalculado, percentual]);
+
+  function adicionarServicoTabela(e: React.ChangeEvent<HTMLSelectElement>) {
+    const id = e.target.value;
+    if (!id) return;
+    const servico = tabelaPrecos.find((s) => s.id === id);
+    if (servico) {
+      setDescricaoServico((prev) => (prev ? prev + "\n+ " : "") + servico.nome);
+      if (servico.precoBase) {
+        const atual = paraNumeroBr(valorServico) || 0;
+        const novo = atual + servico.precoBase;
+        setValorServico(novo.toLocaleString("pt-BR", { minimumFractionDigits: 2 }));
+      }
+    }
+    e.target.value = ""; // Reseta o select após a escolha
+  }
 
   return (
     <form action={action} className="space-y-6">
@@ -295,6 +311,27 @@ export function NovaMontagemForm({
               onChange={(e) => setDataAgendada(e.target.value)}
             />
           </Field>
+          <div className="sm:col-span-2">
+            <Field label="Preenchimento rápido (Tabela de Preços)">
+              <Select onChange={adicionarServicoTabela} defaultValue="">
+                <option value="">Selecione um serviço para adicionar...</option>
+                <optgroup label="Serviços Principais">
+                  {tabelaPrecos.filter((s) => s.categoria === "Principal").map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.nome} ({s.precoFormatado})
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Serviços Adicionais">
+                  {tabelaPrecos.filter((s) => s.categoria === "Adicional").map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.nome} ({s.precoFormatado})
+                    </option>
+                  ))}
+                </optgroup>
+              </Select>
+            </Field>
+          </div>
           <div className="sm:col-span-2">
             <Field label="Descrição do serviço">
               <Textarea

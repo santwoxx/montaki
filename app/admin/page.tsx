@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import { formatarData, formatarMoeda, STATUS_COLOR, STATUS_LABEL } from "@/lib/format";
 import { Badge, Card, LinkButton, PageHeader, StatCard, Vazio } from "@/components/ui";
 import { GraficoFaturamento, type PontoFaturamento } from "@/components/GraficoFaturamento";
@@ -14,59 +14,112 @@ export default async function AdminDashboardPage() {
   const inicioJanela = new Date(inicioMes);
   inicioJanela.setMonth(inicioJanela.getMonth() - (MESES_PARA_GRAFICO - 1));
 
+  // Fetch all necessary data from Firestore
+  // To avoid complex composite index errors out of the box, we fetch broad sets 
+  // and filter in memory since the dataset for 6 months is small.
+  
   const [
-    pendentes,
-    emAndamento,
-    naoAtribuidas,
-    aPagarAgg,
-    faturamentoMesAgg,
-    concluidasMes,
-    montadoresAtivos,
-    proximas,
-    notasPendentesCount,
-    aguardandoConfirmacaoIntegracaoExterna,
-    montagensParaGrafico,
+    montagensSnapshot,
+    usersSnapshot,
+    lojasSnapshot,
+    notasPendentesSnapshot
   ] = await Promise.all([
-    prisma.montagem.count({ where: { status: "PENDENTE" } }),
-    prisma.montagem.count({ where: { status: "EM_ANDAMENTO" } }),
-    prisma.montagem.count({
-      where: { montadorId: null, status: { not: "CANCELADO" } },
-    }),
-    prisma.montagem.aggregate({
-      _sum: { valorMontador: true },
-      where: { pagoAoMontador: false, status: "CONCLUIDO" },
-    }),
-    prisma.montagem.aggregate({
-      _sum: { valorServico: true, valorAssistencia: true },
-      where: { createdAt: { gte: inicioMes }, status: { not: "CANCELADO" } },
-    }),
-    prisma.montagem.count({
-      where: { status: "CONCLUIDO", concluidoEm: { gte: inicioMes } },
-    }),
-    prisma.user.count({ where: { role: "MONTADOR", ativo: true } }),
-    prisma.montagem.findMany({
-      where: {
-        status: { in: ["PENDENTE", "EM_ANDAMENTO"] },
-      },
-      orderBy: [{ dataAgendada: "asc" }, { createdAt: "desc" }],
-      take: 6,
-      include: { loja: true, montador: true },
-    }),
-    prisma.notaPendente.count(),
-    prisma.montagem.findMany({
-      where: {
-        status: "CONCLUIDO",
-        numeroPedido: { startsWith: "del-" },
-        notificadoCentralSyncEm: null,
-      },
-      select: { id: true, clienteNome: true, montador: { select: { nome: true } } },
-      take: 5,
-    }),
-    prisma.montagem.findMany({
-      where: { status: { not: "CANCELADO" }, createdAt: { gte: inicioJanela } },
-      select: { createdAt: true, valorServico: true },
-    }),
+    adminDb.collection("montagens").get(),
+    adminDb.collection("users").where("role", "==", "MONTADOR").where("ativo", "==", true).get(),
+    adminDb.collection("lojas").get(),
+    adminDb.collection("notasPendentes").get(),
   ]);
+
+  const allMontagens = montagensSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+  
+  // Create maps for relationships
+  const usersMap = new Map();
+  usersSnapshot.docs.forEach(doc => usersMap.set(doc.id, { id: doc.id, ...doc.data() }));
+  
+  const lojasMap = new Map();
+  lojasSnapshot.docs.forEach(doc => lojasMap.set(doc.id, { id: doc.id, ...doc.data() }));
+
+  let pendentes = 0;
+  let emAndamento = 0;
+  let naoAtribuidas = 0;
+  let aPagarMontador = 0;
+  let faturamentoServico = 0;
+  let faturamentoAssistencia = 0;
+  let concluidasMes = 0;
+  const montadoresAtivos = usersSnapshot.size;
+  const notasPendentesCount = notasPendentesSnapshot.size;
+  
+  const aguardandoConfirmacaoIntegracaoExterna: any[] = [];
+  const proximas: any[] = [];
+  const montagensParaGrafico: any[] = [];
+
+  for (const m of allMontagens) {
+    // Parsing dates from Firestore Timestamps
+    const createdAt = m.criadoEm?.toDate() || new Date(0);
+    const concluidoEm = m.concluidoEm?.toDate();
+    const dataAgendada = m.dataAgendada?.toDate();
+
+    if (m.status === "PENDENTE") pendentes++;
+    if (m.status === "EM_ANDAMENTO") emAndamento++;
+    
+    if (!m.montadorId && m.status !== "CANCELADO") {
+      naoAtribuidas++;
+    }
+
+    if (m.status === "CONCLUIDO" && !m.pagoAoMontador) {
+      aPagarMontador += (m.valorMontador || 0);
+    }
+
+    if (createdAt >= inicioMes && m.status !== "CANCELADO") {
+      faturamentoServico += (m.valorServico || 0);
+      faturamentoAssistencia += (m.valorAssistencia || 0);
+    }
+
+    if (m.status === "CONCLUIDO" && concluidoEm && concluidoEm >= inicioMes) {
+      concluidasMes++;
+    }
+
+    if (m.status === "CONCLUIDO" && (m.numeroPedido || "").startsWith("del-") && !m.notificadoCentralSyncEm) {
+      aguardandoConfirmacaoIntegracaoExterna.push({
+        id: m.id,
+        clienteNome: m.clienteNome,
+        montador: usersMap.get(m.montadorId)
+      });
+    }
+
+    if (m.status === "PENDENTE" || m.status === "EM_ANDAMENTO") {
+      proximas.push({
+        ...m,
+        createdAt,
+        dataAgendada,
+        loja: lojasMap.get(m.lojaId) || { nome: "Loja Excluída" },
+        montador: usersMap.get(m.montadorId)
+      });
+    }
+
+    if (m.status !== "CANCELADO" && createdAt >= inicioJanela) {
+      montagensParaGrafico.push({
+        createdAt,
+        valorServico: m.valorServico || 0
+      });
+    }
+  }
+
+  // Ordenar próximas montagens (dataAgendada asc, createdAt desc)
+  proximas.sort((a, b) => {
+    if (a.dataAgendada && !b.dataAgendada) return -1;
+    if (!a.dataAgendada && b.dataAgendada) return 1;
+    if (a.dataAgendada && b.dataAgendada) {
+      if (a.dataAgendada.getTime() !== b.dataAgendada.getTime()) {
+        return a.dataAgendada.getTime() - b.dataAgendada.getTime();
+      }
+    }
+    return b.createdAt.getTime() - a.createdAt.getTime();
+  });
+  
+  const proximasTop6 = proximas.slice(0, 6);
+
+  const aguardandoTop5 = aguardandoConfirmacaoIntegracaoExterna.slice(0, 5);
 
   const dadosFaturamento: PontoFaturamento[] = Array.from({ length: MESES_PARA_GRAFICO }, (_, i) => {
     const data = new Date(inicioMes);
@@ -111,15 +164,15 @@ export default async function AdminDashboardPage() {
         </Link>
       ) : null}
 
-      {aguardandoConfirmacaoIntegracaoExterna.length > 0 ? (
+      {aguardandoTop5.length > 0 ? (
         <Card className="mb-6 border-blue-100 bg-blue-50/40">
           <p className="font-semibold text-slate-900">
-            📤 {aguardandoConfirmacaoIntegracaoExterna.length} montagem
-            {aguardandoConfirmacaoIntegracaoExterna.length > 1 ? "ns" : ""} concluída
-            {aguardandoConfirmacaoIntegracaoExterna.length > 1 ? "s" : ""} esperando confirmação para o sistema externo
+            📤 {aguardandoTop5.length} montagem
+            {aguardandoTop5.length > 1 ? "ns" : ""} concluída
+            {aguardandoTop5.length > 1 ? "s" : ""} esperando confirmação para o sistema externo
           </p>
           <div className="mt-2 space-y-1">
-            {aguardandoConfirmacaoIntegracaoExterna.map((m) => (
+            {aguardandoTop5.map((m) => (
               <Link
                 key={m.id}
                 href={`/admin/montagens/${m.id}`}
@@ -144,18 +197,18 @@ export default async function AdminDashboardPage() {
         />
         <StatCard
           titulo="A receber das lojas"
-          valor={formatarMoeda(((faturamentoMesAgg._sum.valorServico || 0) * 0.08) + (faturamentoMesAgg._sum.valorAssistencia || 0))}
+          valor={formatarMoeda((faturamentoServico * 0.08) + faturamentoAssistencia)}
           sub="8% sobre o faturamento do mês + Assistências"
           icone="🏬"
         />
         <StatCard
           titulo="A pagar aos montadores"
-          valor={formatarMoeda(aPagarAgg._sum.valorMontador)}
+          valor={formatarMoeda(aPagarMontador)}
           icone="👷"
         />
         <StatCard
           titulo="Faturamento do mês"
-          valor={formatarMoeda(faturamentoMesAgg._sum.valorServico)}
+          valor={formatarMoeda(faturamentoServico)}
           sub={`${concluidasMes} concluída(s) no mês · ${montadoresAtivos} montador(es) ativo(s)`}
           cor="text-emerald-600"
           icone="📈"
@@ -174,11 +227,11 @@ export default async function AdminDashboardPage() {
 
       <div className="mt-8">
         <PageHeader titulo="Próximas montagens" />
-        {proximas.length === 0 ? (
+        {proximasTop6.length === 0 ? (
           <Vazio>Nenhuma montagem pendente ou em andamento no momento.</Vazio>
         ) : (
           <div className="space-y-3">
-            {proximas.map((m) => (
+            {proximasTop6.map((m) => (
               <Link key={m.id} href={`/admin/montagens/${m.id}`}>
                 <Card className="transition-shadow hover:shadow-md">
                   <div className="flex flex-wrap items-start justify-between gap-2">
@@ -191,8 +244,8 @@ export default async function AdminDashboardPage() {
                         {m.dataAgendada ? `Agendado para ${formatarData(m.dataAgendada)}` : "Sem data definida"}
                       </p>
                     </div>
-                    <Badge className={STATUS_COLOR[m.status]}>
-                      {STATUS_LABEL[m.status]}
+                    <Badge className={STATUS_COLOR[m.status as keyof typeof STATUS_COLOR]}>
+                      {STATUS_LABEL[m.status as keyof typeof STATUS_LABEL]}
                     </Badge>
                   </div>
                 </Card>

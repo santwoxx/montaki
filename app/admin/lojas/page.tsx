@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import { criarLojaAction, atualizarLojaAction, excluirLojaAction } from "@/lib/actions/lojas";
 import { Alerta, Badge, Button, Card, Field, Input, PageHeader, Vazio } from "@/components/ui";
 import { FormConfirmar } from "@/components/FormConfirmar";
@@ -12,10 +12,24 @@ export default async function LojasPage({
 }) {
   const { erro, sucesso } = await searchParams;
 
-  const lojas = await prisma.loja.findMany({
-    orderBy: { nome: "asc" },
-    include: { _count: { select: { montagens: true } } },
-  });
+  const lojasSnapshot = await adminDb.collection("lojas").orderBy("nome", "asc").get();
+  
+  const lojasList = lojasSnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...(doc.data() as any)
+  }));
+
+  // Fetch counts concurrently
+  const counts = await Promise.all(
+    lojasList.map(loja => 
+      adminDb.collection("montagens").where("lojaId", "==", loja.id).count().get()
+    )
+  );
+
+  const lojas = lojasList.map((loja, index) => ({
+    ...loja,
+    _count: { montagens: counts[index].data().count }
+  }));
 
   return (
     <div>
@@ -104,7 +118,7 @@ export default async function LojasPage({
                     label="CNPJ"
                     hint="Usado pela importação de notas para reconhecer a loja automaticamente."
                   >
-                    <Input name="cnpj" defaultValue={formatarCnpj(loja.cnpj)} />
+                    <Input name="cnpj" defaultValue={formatarCnpj(loja.cnpj ?? "")} />
                   </Field>
                   <div className="sm:col-span-2">
                     <Field label="Endereço">

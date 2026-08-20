@@ -16,7 +16,13 @@ export async function loginAction(formData: FormData) {
     );
   }
 
-  const user = await prisma.user.findUnique({ where: { email } });
+  let user;
+  try {
+    user = await prisma.user.findUnique({ where: { email } });
+  } catch (error) {
+    console.error("Erro de banco de dados no login:", error);
+    redirect(`/login?erro=${encodeURIComponent("Erro de conexão com o banco de dados.")}${sufixoProximo}`);
+  }
 
   if (!user || !user.ativo || !user.senha || !(await verifyPassword(senha, user.senha))) {
     redirect(

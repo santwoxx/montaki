@@ -26,7 +26,9 @@ import { firestore } from "@/lib/firebase/admin";
 import { COLECOES, type NomeColecao } from "@/lib/colecoes";
 import type {
   Avaliacao,
+  CategoriaServico,
   ComissaoLoja,
+  ItemTabelaPreco,
   Loja,
   Montagem,
   NotaPendente,
@@ -39,6 +41,7 @@ import type {
   Usuario,
   Vinculo,
 } from "@/lib/tipos";
+import { tabelaPrecos } from "@/lib/tabelaPrecos";
 
 export { COLECOES, idComissao } from "@/lib/colecoes";
 export type { NomeColecao } from "@/lib/colecoes";
@@ -259,7 +262,26 @@ function paraOrcamento({ id, dados: d }: Documento): Orcamento {
       item?.total !== null && item?.total !== undefined
         ? numero(item.total)
         : null,
+    fotoUrl: texto(item?.fotoUrl),
+    observacao: texto(item?.observacao),
   }));
+
+  const fotosBrutas = Array.isArray(d.fotos) ? d.fotos : [];
+  const fotos = fotosBrutas
+    .map((f) => texto(f))
+    .filter((f): f is string => Boolean(f));
+
+  const respostaAdminBruta =
+    typeof d.respostaAdmin === "object" && d.respostaAdmin !== null
+      ? (d.respostaAdmin as Record<string, unknown>)
+      : null;
+  const respostaAdmin = respostaAdminBruta
+    ? {
+        valorProposto: numeroOuNulo(respostaAdminBruta.valorProposto) ?? undefined,
+        mensagem: texto(respostaAdminBruta.mensagem) ?? undefined,
+        enviadoEm: data(respostaAdminBruta.enviadoEm) ?? undefined,
+      }
+    : null;
 
   const origemValida = d.origem === "CLIENTE" || d.origem === "ADMIN" ? d.origem : "ADMIN";
 
@@ -274,8 +296,35 @@ function paraOrcamento({ id, dados: d }: Documento): Orcamento {
     status: umDe(d.status, STATUS_ORCAMENTO, "PENDENTE"),
     total: numero(d.total),
     origem: origemValida,
+    fotos: fotos.length > 0 ? fotos : undefined,
+    respostaAdmin,
     criadoEm: dataObrigatoria(d.criadoEm),
     validoAte: data(d.validoAte),
+  };
+}
+
+function paraServico({ id, dados: d }: Documento): ItemTabelaPreco {
+  const precoBase = numeroOuNulo(d.precoBase);
+  const precoFormatado =
+    texto(d.precoFormatado) ||
+    (precoBase !== null
+      ? precoBase.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+      : "Orçamento");
+
+  const categoria: CategoriaServico =
+    d.categoria === "Adicional" ? "Adicional" : "Principal";
+
+  return {
+    id,
+    nome: textoObrigatorio(d.nome),
+    precoBase,
+    precoFormatado,
+    categoria,
+    observacao: texto(d.observacao),
+    ativo: booleano(d.ativo, true),
+    ordem: numero(d.ordem, 0),
+    criadoEm: data(d.criadoEm) ?? undefined,
+    atualizadoEm: data(d.atualizadoEm) ?? undefined,
   };
 }
 
@@ -622,5 +671,80 @@ export const listarOrcamentos = cache(async (): Promise<Orcamento[]> => {
 
 export async function buscarOrcamento(id: string): Promise<Orcamento | null> {
   return lerDocumento(COLECOES.orcamentos, id, paraOrcamento);
+}
+
+// --- serviços e tabela de preços ------------------------------------------
+
+/**
+ * Inicializa a coleção de serviços com a tabela padrão de lib/tabelaPrecos.ts
+ * caso o banco ainda não possua nenhum serviço cadastrado.
+ */
+export async function inicializarServicosPadrao(): Promise<void> {
+  const db = firestore();
+  const existentes = await db.collection(COLECOES.servicos).limit(1).get();
+  if (!existentes.empty) return;
+
+  const lote = db.batch();
+  const agora = new Date();
+
+  tabelaPrecos.forEach((item, index) => {
+    const ref = db.collection(COLECOES.servicos).doc(item.id);
+    lote.set(ref, {
+      nome: item.nome,
+      precoBase: item.precoBase,
+      precoFormatado: item.precoFormatado,
+      categoria: item.categoria,
+      observacao: item.observacao ?? null,
+      ativo: true,
+      ordem: index,
+      criadoEm: agora,
+      atualizadoEm: agora,
+    });
+  });
+
+  await lote.commit();
+}
+
+/**
+ * Lista serviços ativos para exibição pública e no formulário de orçamento.
+ * Se ainda não houver itens no Firestore, devolve a tabela padrão em memória.
+ */
+export const listarServicos = cache(async (): Promise<ItemTabelaPreco[]> => {
+  const servicos = await lerColecao(COLECOES.servicos, paraServico);
+  if (servicos.length === 0) {
+    return tabelaPrecos.map((item, index) => ({
+      ...item,
+      ativo: true,
+      ordem: index,
+    }));
+  }
+  return ordenarPor(
+    servicos.filter((s) => s.ativo !== false),
+    ["ordem", "asc"],
+    ["nome", "asc"]
+  );
+});
+
+/**
+ * Lista todos os serviços (ativos e inativos) para o painel de administração.
+ */
+export const listarTodosServicosAdmin = cache(async (): Promise<ItemTabelaPreco[]> => {
+  const servicos = await lerColecao(COLECOES.servicos, paraServico);
+  if (servicos.length === 0) {
+    return tabelaPrecos.map((item, index) => ({
+      ...item,
+      ativo: true,
+      ordem: index,
+    }));
+  }
+  return ordenarPor(servicos, ["ordem", "asc"], ["nome", "asc"]);
+});
+
+export async function buscarServico(id: string): Promise<ItemTabelaPreco | null> {
+  const doBanco = await lerDocumento(COLECOES.servicos, id, paraServico);
+  if (doBanco) return doBanco;
+  const padrao = tabelaPrecos.find((p) => p.id === id);
+  if (padrao) return { ...padrao, ativo: true, ordem: 0 };
+  return null;
 }
 

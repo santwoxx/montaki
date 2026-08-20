@@ -1,4 +1,5 @@
 import { Metadata } from "next";
+import { listarServicos } from "@/lib/db";
 import SolicitarOrcamentoClient from "@/app/orcamento/solicitar/SolicitarOrcamentoClient";
 
 export const metadata: Metadata = {
@@ -6,10 +7,14 @@ export const metadata: Metadata = {
   description: "Solicite um orçamento rápido e sem compromisso para montagem de móveis com a Montaki.",
 };
 
-export default function SolicitarOrcamentoPageAlias() {
+export const dynamic = "force-dynamic";
+
+export default async function SolicitarOrcamentoPageAlias() {
+  const servicos = await listarServicos();
+
   return (
     <div className="min-h-screen bg-slate-50 py-6 sm:py-10">
-      <SolicitarOrcamentoClient />
+      <SolicitarOrcamentoClient servicosIniciais={servicos} />
     </div>
   );
 }

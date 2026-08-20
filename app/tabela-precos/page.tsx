@@ -1,16 +1,20 @@
 import Link from "next/link";
-import { tabelaPrecos, regrasComerciais } from "@/lib/tabelaPrecos";
+import { listarServicos } from "@/lib/db";
+import { regrasComerciais } from "@/lib/tabelaPrecos";
 import { Card } from "@/components/ui";
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Tabela de Preços | Montaki",
-  description: "Tabela de preços sugeridos para montagem de móveis da Montaki.",
+  description: "Tabela oficial de preços sugeridos para montagem de móveis da Montaki.",
 };
 
-export default function TabelaPrecosPage() {
-  const principais = tabelaPrecos.filter((item) => item.categoria === "Principal");
-  const adicionais = tabelaPrecos.filter((item) => item.categoria === "Adicional");
+export const dynamic = "force-dynamic";
+
+export default async function TabelaPrecosPage() {
+  const servicos = await listarServicos();
+  const principais = servicos.filter((item) => item.categoria === "Principal");
+  const adicionais = servicos.filter((item) => item.categoria === "Adicional");
 
   return (
     <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6 lg:px-8">
@@ -25,13 +29,21 @@ export default function TabelaPrecosPage() {
           <p className="text-lg text-slate-600 max-w-xl mx-auto">
             Valores oficiais de referência para montagem e serviços adicionais.
           </p>
-          <div className="pt-2">
+          <div className="pt-2 flex flex-wrap gap-3 justify-center">
             <Link
               href="/orcamento/solicitar"
               className="inline-flex items-center gap-2 rounded-xl bg-gold px-6 py-3 font-bold text-navy shadow-lg hover:bg-gold-light transition-all font-display uppercase tracking-wide text-sm"
             >
-              <span>🚀 Fazer Orçamento Online Agora</span>
+              <span>🚀 Fazer Orçamento Online</span>
             </Link>
+            <a
+              href="https://wa.me/5524993210547?text=Ol%C3%A1%2C%20vi%20a%20tabela%20de%20pre%C3%A7os%20e%20gostaria%20de%20tirar%20d%C3%BAvidas%20sobre%20montagem."
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 rounded-xl bg-[#25D366] hover:bg-[#1EBE5D] px-5 py-3 font-bold text-white shadow-lg transition-all font-display uppercase tracking-wide text-sm"
+            >
+              <span>💬 Falar com Atendente</span>
+            </a>
           </div>
         </div>
 

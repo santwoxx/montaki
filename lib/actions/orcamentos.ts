@@ -20,6 +20,7 @@ export type SolicitacaoOrcamentoInput = {
   observacoes?: string;
   itens: ItemOrcamento[];
   total: number;
+  fotos?: string[];
 };
 
 /**
@@ -36,17 +37,25 @@ export async function solicitarOrcamentoPublicoAction(
     const observacoes = String(dados.observacoes || "").trim();
     const itens = Array.isArray(dados.itens) ? dados.itens : [];
     const total = Number(dados.total) || 0;
+    const fotos = Array.isArray(dados.fotos) ? dados.fotos.filter(Boolean) : [];
 
     if (!cliente) {
-      return { sucesso: false, erro: "Informe seu nome." };
+      return { sucesso: false, erro: "Informe seu nome completo." };
     }
 
-    if (!telefone || telefone.length < 8) {
-      return { sucesso: false, erro: "Informe um telefone/WhatsApp válido." };
+    const digitosTelefone = telefone.replace(/\D/g, "");
+    if (!telefone || digitosTelefone.length < 10) {
+      return {
+        sucesso: false,
+        erro: "Informe um número de WhatsApp válido com DDD (ex: 24 99999-9999).",
+      };
     }
 
     if (itens.length === 0) {
-      return { sucesso: false, erro: "Selecione ao menos um serviço ou móvel para o orçamento." };
+      return {
+        sucesso: false,
+        erro: "Selecione ao menos um serviço ou adicione o móvel para o orçamento.",
+      };
     }
 
     const id = await criarDocumento(COLECOES.orcamentos, {
@@ -59,6 +68,8 @@ export async function solicitarOrcamentoPublicoAction(
       total,
       origem: "CLIENTE",
       status: "PENDENTE",
+      fotos: fotos.length > 0 ? fotos : null,
+      respostaAdmin: null,
       criadoEm: new Date(),
       validoAte: null,
     });
@@ -92,6 +103,67 @@ export async function atualizarStatusOrcamentoAction(
   revalidatePath("/admin/orcamentos");
   revalidatePath(`/admin/orcamentos/${id}`);
   revalidatePath(`/orcamento/${id}`);
+}
+
+/**
+ * Ação de administrador: define ou ajusta o preço total do orçamento (ex: após avaliar fotos enviadas pelo cliente).
+ */
+export async function definirPrecoOrcamentoAction(
+  orcamentoId: string,
+  novoTotal: number,
+  observacoesAdmin?: string
+): Promise<{ sucesso: boolean; erro?: string }> {
+  try {
+    await requireAdmin();
+
+    const orcamento = await buscarOrcamento(orcamentoId);
+    if (!orcamento) {
+      return { sucesso: false, erro: "Orçamento não encontrado." };
+    }
+
+    const totalValido = Math.max(0, Number(novoTotal) || 0);
+
+    const dadosAtualizacao: Record<string, unknown> = {
+      total: totalValido,
+    };
+
+    if (observacoesAdmin !== undefined) {
+      dadosAtualizacao.observacoes = observacoesAdmin || null;
+    }
+
+    await atualizarDocumento(COLECOES.orcamentos, orcamentoId, dadosAtualizacao);
+
+    revalidatePath("/admin/orcamentos");
+    revalidatePath(`/admin/orcamentos/${orcamentoId}`);
+    revalidatePath(`/orcamento/${orcamentoId}`);
+
+    return { sucesso: true };
+  } catch (error) {
+    console.error("Erro ao definir preço do orçamento:", error);
+    return { sucesso: false, erro: "Erro ao salvar novo valor do orçamento." };
+  }
+}
+
+/**
+ * Ação de administrador: registra o envio da mensagem com proposta de preço no WhatsApp.
+ */
+export async function registrarEnvioWhatsAppAction(
+  orcamentoId: string,
+  valorProposto: number,
+  mensagem: string
+) {
+  await requireAdmin();
+
+  await atualizarDocumento(COLECOES.orcamentos, orcamentoId, {
+    respostaAdmin: {
+      valorProposto: Number(valorProposto) || 0,
+      mensagem: String(mensagem || ""),
+      enviadoEm: new Date(),
+    },
+  });
+
+  revalidatePath(`/admin/orcamentos/${orcamentoId}`);
+  revalidatePath("/admin/orcamentos");
 }
 
 /**
@@ -145,6 +217,8 @@ export async function converterOrcamentoEmMontagemAction(
     .filter(Boolean)
     .join(" | ");
 
+  const fotoPrincipal = orcamento.fotos && orcamento.fotos.length > 0 ? orcamento.fotos[0] : null;
+
   const agora = new Date();
   const montagemId = await criarDocumento(COLECOES.montagens, {
     lojaId,
@@ -165,7 +239,7 @@ export async function converterOrcamentoEmMontagemAction(
     pagoPelaLoja: false,
     pagoAoMontador: false,
     concluidoEm: null,
-    fotoProdutoUrl: null,
+    fotoProdutoUrl: fotoPrincipal,
     assinaturaMontador: null,
     assinaturaCliente: null,
     manualUrl: null,

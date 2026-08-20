@@ -115,7 +115,12 @@ export default async function AdminDashboardPage() {
         titulo="Painel geral"
         descricao="Visão rápida das montagens e das finanças da sua empresa."
         acoes={
-          <LinkButton href="/admin/montagens/nova">+ Nova montagem</LinkButton>
+          <div className="flex items-center gap-2">
+            <LinkButton href="/admin/servicos" variante="secundario">
+              📋 Tabela de Preços
+            </LinkButton>
+            <LinkButton href="/admin/montagens/nova">+ Nova montagem</LinkButton>
+          </div>
         }
       />
 

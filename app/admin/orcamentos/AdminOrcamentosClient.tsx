@@ -189,7 +189,7 @@ export default function AdminOrcamentosClient({
           {filtrados.map((orc) => {
             const telLimpo = (orc.telefone || "").replace(/\D/g, "");
             const msgCliente = encodeURIComponent(
-              `Olá ${orc.cliente || ""}! Sou da Montaki Montagem de Móveis sobre o orçamento #${orc.id.slice(0, 7).toUpperCase()} que você solicitou no valor de ${formatarMoeda(orc.total)}.`
+              `Olá ${orc.cliente || "Cliente"}! Sou da equipe Montaki sobre seu orçamento #${orc.id.slice(0, 7).toUpperCase()}${orc.total > 0 ? ` no valor de ${formatarMoeda(orc.total)}` : ""}. Gostaria de confirmar detalhes e agendamento da montagem!`
             );
 
             return (
@@ -212,6 +212,16 @@ export default function AdminOrcamentosClient({
                         >
                           {orc.status}
                         </span>
+                        {orc.fotos && orc.fotos.length > 0 && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                            📸 {orc.fotos.length} foto(s)
+                          </span>
+                        )}
+                        {orc.respostaAdmin?.enviadoEm && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                            ✓ Preço Enviado
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5">
                         Solicitado em {formatarData(orc.criadoEm)}
@@ -225,9 +235,9 @@ export default function AdminOrcamentosClient({
                   </div>
 
                   <div className="text-left sm:text-right">
-                    <span className="text-xs text-slate-400 block">Valor Estimado</span>
+                    <span className="text-xs text-slate-400 block">Valor Montagem</span>
                     <span className="text-xl font-extrabold text-navy font-display">
-                      {formatarMoeda(orc.total)}
+                      {orc.total > 0 ? formatarMoeda(orc.total) : "Sob consulta"}
                     </span>
                   </div>
                 </div>

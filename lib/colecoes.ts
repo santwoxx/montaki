@@ -15,6 +15,7 @@ export const COLECOES = {
   ocorrencias: "ocorrencias",
   avaliacoes: "avaliacoes",
   orcamentos: "orcamentos",
+  servicos: "servicos",
 } as const;
 
 export type NomeColecao = (typeof COLECOES)[keyof typeof COLECOES];

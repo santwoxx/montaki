@@ -83,11 +83,18 @@ export default async function PublicOrcamentoPage({
                     key={idx}
                     className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 flex justify-between items-center text-sm"
                   >
-                    <span className="font-medium text-slate-800">
-                      {item.quantidade}x {item.nome}
-                    </span>
-                    <span className="font-bold text-navy">
-                      {item.total ? formatarMoeda(item.total) : "A combinar"}
+                    <div>
+                      <span className="font-medium text-slate-800">
+                        {item.quantidade}x {item.nome}
+                      </span>
+                      {item.observacao && (
+                        <span className="block text-[11px] text-slate-500 italic">
+                          {item.observacao}
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-bold text-navy shrink-0">
+                      {item.total ? formatarMoeda(item.total) : "Sob avaliação"}
                     </span>
                   </div>
                 ))}
@@ -112,6 +119,28 @@ export default async function PublicOrcamentoPage({
               </div>
             )}
 
+            {/* Fotos anexadas */}
+            {orcamento.fotos && orcamento.fotos.length > 0 && (
+              <div className="p-3.5 bg-amber-50/50 rounded-xl border border-amber-200/60 space-y-2">
+                <p className="text-xs font-bold text-amber-950">
+                  Fotos Anexadas do Móvel ({orcamento.fotos.length}):
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {orcamento.fotos.map((url, idx) => (
+                    <a
+                      key={idx}
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block h-14 w-14 rounded-lg border border-amber-300 bg-cover bg-center overflow-hidden hover:scale-105 transition-transform"
+                      style={{ backgroundImage: `url(${url})` }}
+                      title="Clique para ver em tamanho real"
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
             {orcamento.observacoes && (
               <div className="p-3 bg-amber-50/60 rounded-xl border border-amber-200/60 text-xs text-slate-700">
                 <strong>Observações:</strong> {orcamento.observacoes}
@@ -120,9 +149,11 @@ export default async function PublicOrcamentoPage({
           </div>
 
           <div className="flex justify-between items-center bg-navy p-4 rounded-xl text-white mb-6">
-            <span className="text-sm font-bold text-slate-300 uppercase">Total Estimado</span>
+            <span className="text-sm font-bold text-slate-300 uppercase">
+              {orcamento.total > 0 ? "Total da Montagem" : "Valor Estimado"}
+            </span>
             <span className="text-2xl font-black text-gold font-display">
-              {formatarMoeda(orcamento.total)}
+              {orcamento.total > 0 ? formatarMoeda(orcamento.total) : "Sob Consulta"}
             </span>
           </div>
 

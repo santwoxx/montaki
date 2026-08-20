@@ -10,6 +10,7 @@ import {
 import { Card, PageHeader, Badge } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
 import LinkClient from "./LinkClient";
+import AdminOrcamentoDetalhesClient from "./AdminOrcamentoDetalhesClient";
 import { obterUrlBase } from "@/lib/urlBase";
 import { formatarMoeda, formatarData } from "@/lib/format";
 import {
@@ -55,11 +56,6 @@ export default async function AdminOrcamentoPage({
     REJEITADO: "bg-rose-100 text-rose-800",
   };
 
-  const telLimpo = (orcamento.telefone || "").replace(/\D/g, "");
-  const msgWhatsApp = encodeURIComponent(
-    `Olá ${orcamento.cliente || ""}! Sou da equipe Montaki sobre o orçamento #${orcamento.id.slice(0, 7).toUpperCase()} no valor de ${formatarMoeda(orcamento.total)}.`
-  );
-
   const temItens = orcamento.itens && orcamento.itens.length > 0;
   const temMontagens = montagens.length > 0;
 
@@ -88,7 +84,7 @@ export default async function AdminOrcamentoPage({
 
       <PageHeader
         titulo={`Orçamento #${orcamento.id.slice(0, 7).toUpperCase()}`}
-        descricao="Detalhes da solicitação de orçamento, itens selecionados e agendamento de montagem."
+        descricao="Detalhes da solicitação de orçamento, avaliação de fotos de móveis, precificação e agendamento."
       />
 
       {sp.erro && (
@@ -101,6 +97,9 @@ export default async function AdminOrcamentoPage({
           ✓ {sp.sucesso}
         </div>
       )}
+
+      {/* Componente Interativo de Fotos & Precificação com WhatsApp */}
+      <AdminOrcamentoDetalhesClient orcamento={orcamento} linkPublico={linkOrcamento} />
 
       <div className="grid gap-6 md:grid-cols-2">
         {/* Coluna Esquerda: Dados do Cliente e Link */}
@@ -121,19 +120,9 @@ export default async function AdminOrcamentoPage({
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-500">WhatsApp / Telefone:</span>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-slate-900">{orcamento.telefone || "Não informado"}</span>
-                  {telLimpo && (
-                    <a
-                      href={`https://wa.me/55${telLimpo}?text=${msgWhatsApp}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="rounded-md bg-[#25D366] px-2 py-0.5 text-xs font-bold text-white hover:bg-[#1EBE5D]"
-                    >
-                      💬 Conversar
-                    </a>
-                  )}
-                </div>
+                <span className="font-bold text-emerald-800 font-mono">
+                  {orcamento.telefone ? `📞 ${orcamento.telefone}` : "Não informado"}
+                </span>
               </div>
               {orcamento.endereco && (
                 <div className="flex justify-between">
@@ -155,7 +144,7 @@ export default async function AdminOrcamentoPage({
               </div>
               {orcamento.observacoes && (
                 <div className="pt-2 border-t border-slate-100 text-xs text-slate-600 bg-slate-50 p-2.5 rounded-lg">
-                  <strong className="text-slate-800">Observações:</strong> {orcamento.observacoes}
+                  <strong className="text-slate-800">Observações do cliente:</strong> {orcamento.observacoes}
                 </div>
               )}
             </div>
@@ -210,7 +199,7 @@ export default async function AdminOrcamentoPage({
           {/* Card Itens Selecionados */}
           <Card className="space-y-4">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-900 text-base">Itens & Serviços</h3>
+              <h3 className="font-bold text-slate-900 text-base">Itens & Serviços Solicitados</h3>
               <span className="text-lg font-black text-navy font-display">
                 {formatarMoeda(orcamento.total)}
               </span>
@@ -223,11 +212,18 @@ export default async function AdminOrcamentoPage({
                     key={idx}
                     className="flex justify-between items-center rounded-lg bg-slate-50 p-2.5 text-xs text-slate-800 border border-slate-100"
                   >
-                    <span className="font-medium">
-                      {it.quantidade}x {it.nome}
-                    </span>
-                    <span className="font-bold text-navy">
-                      {it.total ? formatarMoeda(it.total) : "A combinar"}
+                    <div>
+                      <span className="font-medium">
+                        {it.quantidade}x {it.nome}
+                      </span>
+                      {it.observacao && (
+                        <span className="block text-[11px] text-slate-500 italic">
+                          {it.observacao}
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-bold text-navy shrink-0">
+                      {it.total ? formatarMoeda(it.total) : "Sob consulta"}
                     </span>
                   </div>
                 ))}
@@ -255,11 +251,11 @@ export default async function AdminOrcamentoPage({
           {/* Transformar em Montagem */}
           <Card className="border-2 border-gold/40 bg-amber-50/20 space-y-4">
             <div>
-              <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
-                <span>🔨</span> Transformar em Montagem
+              <h3 className="font-bold text-slate-900 text-base flex items-center gap-2 font-display">
+                <span>🔨</span> Transformar em Ordem de Montagem
               </h3>
               <p className="text-xs text-slate-600 mt-1">
-                Gere uma ordem de serviço de montagem a partir deste orçamento.
+                Gere uma ordem de serviço de montagem a partir deste orçamento aprovado.
               </p>
             </div>
 

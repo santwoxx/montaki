@@ -1,12 +1,15 @@
-export type CategoriaServico = "Principal" | "Adicional";
+import type { CategoriaServico, ItemTabelaPreco } from "@/lib/tipos";
+export type { CategoriaServico, ItemTabelaPreco };
 
-export interface ItemTabelaPreco {
-  id: string;
-  nome: string;
-  precoBase: number | null; // null significa "Orçamento" ou porcentagem
-  precoFormatado: string; // ex: "R$ 44,00", "R$ 275,00+", "Orçamento"
-  categoria: CategoriaServico;
-  observacao?: string;
+export function formatarPrecoServico(precoBase: number | null, sufixo?: string): string {
+  if (precoBase === null || precoBase === undefined) {
+    return "Orçamento";
+  }
+  const valorFormatado = precoBase.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+  return sufixo ? `${valorFormatado}${sufixo}` : valorFormatado;
 }
 
 export const tabelaPrecos: ItemTabelaPreco[] = [

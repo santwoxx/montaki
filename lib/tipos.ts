@@ -144,12 +144,35 @@ export type Avaliacao = {
   criadoEm: Date;
 };
 
+export type CategoriaServico = "Principal" | "Adicional";
+
+export interface ItemTabelaPreco {
+  id: string;
+  nome: string;
+  precoBase: number | null; // null significa "Orçamento" ou porcentagem
+  precoFormatado: string; // ex: "R$ 44,00", "R$ 275,00+", "Orçamento"
+  categoria: CategoriaServico;
+  observacao?: string | null;
+  ativo?: boolean;
+  ordem?: number;
+  criadoEm?: Date;
+  atualizadoEm?: Date;
+}
+
 export type ItemOrcamento = {
   servicoId?: string;
   nome: string;
   quantidade: number;
   valorUnitario: number | null;
   total: number | null;
+  fotoUrl?: string | null;
+  observacao?: string | null;
+};
+
+export type RespostaAdminOrcamento = {
+  valorProposto?: number;
+  mensagem?: string;
+  enviadoEm?: Date;
 };
 
 export type Orcamento = {
@@ -163,6 +186,8 @@ export type Orcamento = {
   status: StatusOrcamento;
   total: number;
   origem: "CLIENTE" | "ADMIN";
+  fotos?: string[];
+  respostaAdmin?: RespostaAdminOrcamento | null;
   criadoEm: Date;
   validoAte: Date | null;
 };

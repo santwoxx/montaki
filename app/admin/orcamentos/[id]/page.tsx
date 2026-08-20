@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import { Card, PageHeader } from "@/components/ui";
 import LinkClient from "./LinkClient";
 import { formatarMoeda, formatarData } from "@/lib/format";
@@ -12,18 +12,46 @@ export default async function AdminOrcamentoPage({
 }) {
   const { id } = await params;
   
-  const orcamento = await prisma.orcamento.findUnique({
-    where: { id },
-    include: {
-      montagens: {
-        include: { loja: true },
-      },
-    },
-  });
+  const orcamentoDoc = await adminDb.collection("orcamentos").doc(id).get();
 
-  if (!orcamento) {
+  if (!orcamentoDoc.exists) {
     notFound();
   }
+
+  const orcamentoData = orcamentoDoc.data() as any;
+  const montagensIds: string[] = orcamentoData.montagensIds || [];
+  let montagens: any[] = [];
+
+  if (montagensIds.length > 0) {
+    const lojasSnapshot = await adminDb.collection("lojas").get();
+    const lojasMap = new Map();
+    lojasSnapshot.docs.forEach(doc => lojasMap.set(doc.id, doc.data()));
+
+    // Firestore "in" query is limited to 30 items
+    const chunkArray = (arr: string[], size: number) => 
+      Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+
+    const chunks = chunkArray(montagensIds, 30);
+    for (const chunk of chunks) {
+      const ms = await adminDb.collection("montagens").where("__name__", "in", chunk).get();
+      ms.docs.forEach(doc => {
+        const data = doc.data() as any;
+        montagens.push({
+          id: doc.id,
+          ...data,
+          dataAgendada: data.dataAgendada?.toDate() || null,
+          loja: lojasMap.get(data.lojaId) || { nome: "Loja Excluída" }
+        });
+      });
+    }
+  }
+
+  const orcamento = {
+    id,
+    ...orcamentoData,
+    criadoEm: orcamentoData.criadoEm?.toDate() || new Date(0),
+    montagens
+  };
 
   const STATUS_COLOR: Record<string, string> = {
     PENDENTE: "bg-slate-100 text-slate-700",
@@ -72,7 +100,7 @@ export default async function AdminOrcamentoPage({
 
         <div className="space-y-3">
           <h3 className="font-semibold text-slate-900 mb-2">Montagens Inclusas ({orcamento.montagens.length})</h3>
-          {orcamento.montagens.map((m) => (
+          {orcamento.montagens.map((m: any) => (
             <Card key={m.id} className="text-sm">
               <p className="font-medium text-slate-900">{m.clienteNome}</p>
               <p className="text-slate-500">{m.loja.nome}</p>

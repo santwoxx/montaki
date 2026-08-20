@@ -11,6 +11,6 @@ export default defineConfig({
   // execução via lib/prisma.ts) nem sempre suporta os comandos que o
   // Migrate precisa rodar.
   datasource: {
-    url: env("DIRECT_URL"),
+    url: process.env.DIRECT_URL || "postgresql://dummy",
   },
 });

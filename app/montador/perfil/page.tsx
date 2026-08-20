@@ -1,5 +1,5 @@
 import { requireMontador } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import { atualizarPerfilAction } from "@/lib/actions/perfil";
 import { Alerta, Card, LinkButton, PageHeader, Vazio } from "@/components/ui";
 import { PerfilMontadorForm } from "@/components/PerfilMontadorForm";
@@ -18,37 +18,69 @@ export default async function PerfilMontadorPage({
   inicioMes.setDate(1);
   inicioMes.setHours(0, 0, 0, 0);
 
-  const [usuario, lojas, comissoes, ganhoMesAgg, avaliacaoAgg, avaliacoesRecentes] =
-    await Promise.all([
-      prisma.user.findUnique({ where: { id: session.sub } }),
-      prisma.loja.findMany({ where: { ativo: true }, orderBy: { nome: "asc" } }),
-      prisma.comissaoLoja.findMany({ where: { montadorId: session.sub } }),
-      prisma.montagem.aggregate({
-        _sum: { valorMontador: true },
-        where: {
-          montadorId: session.sub,
-          status: "CONCLUIDO",
-          concluidoEm: { gte: inicioMes },
-        },
-      }),
-      prisma.avaliacao.aggregate({
-        _avg: { estrelas: true },
-        _count: { _all: true },
-        where: { montadorId: session.sub },
-      }),
-      prisma.avaliacao.findMany({
-        where: { montadorId: session.sub },
-        orderBy: { criadoEm: "desc" },
-        take: 10,
-        include: { montagem: { select: { clienteNome: true } } },
-      }),
-    ]);
+  const [
+    usuarioDoc,
+    lojasSnapshot,
+    comissoesSnapshot,
+    montagensSnapshot,
+    avaliacoesSnapshot
+  ] = await Promise.all([
+    adminDb.collection("users").doc(session.sub).get(),
+    adminDb.collection("lojas").where("ativo", "==", true).orderBy("nome", "asc").get(),
+    adminDb.collection("comissoesLoja").where("montadorId", "==", session.sub).get(),
+    adminDb.collection("montagens")
+      .where("montadorId", "==", session.sub)
+      .where("status", "==", "CONCLUIDO")
+      .where("concluidoEm", ">=", inicioMes)
+      .get(),
+    adminDb.collection("avaliacoes").where("montadorId", "==", session.sub).get()
+  ]);
 
-  if (!usuario) return null;
+  if (!usuarioDoc.exists) return null;
 
+  const usuario = { id: usuarioDoc.id, ...usuarioDoc.data() as any };
+  
+  const lojas = lojasSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+  
+  const comissoes = comissoesSnapshot.docs.map(doc => doc.data() as any);
   const comissaoPorLoja = new Map(comissoes.map((c) => [c.lojaId, c.percentual]));
-  const mediaAvaliacao = avaliacaoAgg._avg.estrelas ?? 0;
-  const totalAvaliacoes = avaliacaoAgg._count._all;
+
+  const rawMontagens = montagensSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+  const ganhoMesAgg = rawMontagens.reduce((soma, m) => soma + (m.valorMontador || 0), 0);
+
+  const rawAvaliacoes = avaliacoesSnapshot.docs.map(doc => ({ 
+    id: doc.id, 
+    ...doc.data() as any,
+    criadoEm: doc.data().criadoEm?.toDate() || new Date(0)
+  }));
+  
+  const totalAvaliacoes = rawAvaliacoes.length;
+  const mediaAvaliacao = totalAvaliacoes > 0
+    ? rawAvaliacoes.reduce((soma, a) => soma + (a.estrelas || 0), 0) / totalAvaliacoes
+    : 0;
+
+  rawAvaliacoes.sort((a, b) => b.criadoEm.getTime() - a.criadoEm.getTime());
+
+  // We need to fetch montagem details for the top 10 avaliacoes to get clienteNome
+  const avaliacoesRecentesBase = rawAvaliacoes.slice(0, 10);
+  
+  const avaliacoesRecentes = await Promise.all(avaliacoesRecentesBase.map(async (a) => {
+    let clienteNome = "Desconhecido";
+    if (a.montagemId) {
+      // Check if it's already in the montagens we fetched this month
+      const m = rawMontagens.find(mont => mont.id === a.montagemId);
+      if (m) {
+        clienteNome = m.clienteNome;
+      } else {
+        // Fetch it
+        const mDoc = await adminDb.collection("montagens").doc(a.montagemId).get();
+        if (mDoc.exists) {
+          clienteNome = mDoc.data()?.clienteNome || "Desconhecido";
+        }
+      }
+    }
+    return { ...a, montagem: { clienteNome } };
+  }));
 
   return (
     <div>
@@ -74,7 +106,7 @@ export default async function PerfilMontadorPage({
           <div>
             <p className="text-sm font-medium text-slate-500">Ganho este mês</p>
             <p className="mt-1 text-2xl font-bold text-slate-900">
-              {formatarMoeda(ganhoMesAgg._sum.valorMontador)}
+              {formatarMoeda(ganhoMesAgg)}
             </p>
           </div>
           <LinkButton href="/montador/financeiro" variante="secundario">

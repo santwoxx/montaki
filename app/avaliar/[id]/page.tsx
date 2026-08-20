@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import { enviarAvaliacaoAction } from "@/lib/actions/avaliacoes";
 import { AvaliarForm } from "@/components/AvaliarForm";
 import { Estrelas } from "@/components/Estrelas";
@@ -44,12 +44,12 @@ export default async function AvaliarPage({
   const { id } = await params;
   const { erro } = await searchParams;
 
-  const montagem = await prisma.montagem.findUnique({
-    where: { id },
-    include: { montador: true, avaliacao: true },
-  });
+  const [montagemDoc, avaliacoesSnapshot] = await Promise.all([
+    adminDb.collection("montagens").doc(id).get(),
+    adminDb.collection("avaliacoes").where("montagemId", "==", id).limit(1).get()
+  ]);
 
-  if (!montagem || !montagem.montadorId || montagem.status !== "CONCLUIDO") {
+  if (!montagemDoc.exists) {
     return (
       <LayoutAvaliacao>
         <Card className="text-center">
@@ -61,6 +61,40 @@ export default async function AvaliarPage({
       </LayoutAvaliacao>
     );
   }
+
+  const montagemData = montagemDoc.data() as any;
+
+  if (!montagemData.montadorId || montagemData.status !== "CONCLUIDO") {
+    return (
+      <LayoutAvaliacao>
+        <Card className="text-center">
+          <p className="text-slate-700">
+            Este link de avaliação não está disponível. Se você acha que isso é
+            um erro, entre em contato com quem fez a sua montagem.
+          </p>
+        </Card>
+      </LayoutAvaliacao>
+    );
+  }
+
+  let montador = null;
+  const montadorDoc = await adminDb.collection("users").doc(montagemData.montadorId).get();
+  if (montadorDoc.exists) {
+    montador = { id: montadorDoc.id, ...montadorDoc.data() as any };
+  }
+
+  const avaliacao = avaliacoesSnapshot.empty ? null : {
+    id: avaliacoesSnapshot.docs[0].id,
+    ...avaliacoesSnapshot.docs[0].data(),
+    criadoEm: avaliacoesSnapshot.docs[0].data().criadoEm?.toDate() || new Date(0)
+  };
+
+  const montagem = {
+    id,
+    ...montagemData,
+    montador,
+    avaliacao
+  };
 
   if (montagem.avaliacao) {
     return (
@@ -93,12 +127,12 @@ export default async function AvaliarPage({
         </p>
         <p className="mb-5 text-center text-sm text-slate-500">
           Sua opinião ajuda a avaliar o trabalho de{" "}
-          {montagem.montador?.nome.split(" ")[0]}.
+          {montagem.montador?.nome?.split(" ")[0] ?? "quem te atendeu"}.
         </p>
         {erro ? <Alerta tipo="erro">{erro}</Alerta> : null}
         <AvaliarForm
           action={enviarAvaliacaoAction.bind(null, montagem.id)}
-          nomeMontador={montagem.montador?.nome.split(" ")[0] ?? "quem te atendeu"}
+          nomeMontador={montagem.montador?.nome?.split(" ")[0] ?? "quem te atendeu"}
         />
       </Card>
     </LayoutAvaliacao>

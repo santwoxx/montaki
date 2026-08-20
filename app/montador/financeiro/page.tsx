@@ -1,8 +1,7 @@
 import { requireMontador } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import { Badge, Card, Field, Input, PageHeader, Select, StatCard, Vazio } from "@/components/ui";
 import { formatarData, formatarMoeda } from "@/lib/format";
-import type { Prisma } from "@/app/generated/prisma/client";
 
 function mesAtual() {
   const agora = new Date();
@@ -21,60 +20,68 @@ export default async function FinanceiroMontadorPage({
   const inicio = new Date(ano, (mesNumero || 1) - 1, 1);
   const fim = new Date(ano, mesNumero || 1, 1);
 
-  const concluidasBase: Prisma.MontagemWhereInput = {
-    montadorId: session.sub,
-    status: "CONCLUIDO",
-    ...(lojaId ? { lojaId } : {}),
-  };
-
-  const [
-    lojas,
-    pendenteAgg,
-    recebidoAgg,
-    periodoAgg,
-    periodoCount,
-    pendentePorLojaBruto,
-    historico,
-  ] = await Promise.all([
-    prisma.loja.findMany({ orderBy: { nome: "asc" } }),
-    prisma.montagem.aggregate({
-      _sum: { valorMontador: true },
-      where: { ...concluidasBase, pagoAoMontador: false },
-    }),
-    prisma.montagem.aggregate({
-      _sum: { valorMontador: true },
-      where: { ...concluidasBase, pagoAoMontador: true },
-    }),
-    prisma.montagem.aggregate({
-      _sum: { valorMontador: true },
-      where: { ...concluidasBase, concluidoEm: { gte: inicio, lt: fim } },
-    }),
-    prisma.montagem.count({
-      where: { ...concluidasBase, concluidoEm: { gte: inicio, lt: fim } },
-    }),
-    lojaId
-      ? Promise.resolve([])
-      : prisma.montagem.groupBy({
-          by: ["lojaId"],
-          where: { montadorId: session.sub, status: "CONCLUIDO", pagoAoMontador: false },
-          _sum: { valorMontador: true },
-        }),
-    prisma.montagem.findMany({
-      where: { ...concluidasBase, concluidoEm: { gte: inicio, lt: fim } },
-      orderBy: { concluidoEm: "desc" },
-      include: { loja: true },
-    }),
+  const [lojasSnapshot, montagensSnapshot] = await Promise.all([
+    adminDb.collection("lojas").orderBy("nome", "asc").get(),
+    adminDb.collection("montagens").where("montadorId", "==", session.sub).where("status", "==", "CONCLUIDO").get(),
   ]);
 
+  const lojasMap = new Map();
+  const lojas = lojasSnapshot.docs.map(doc => {
+    const data = { id: doc.id, ...doc.data() as any };
+    lojasMap.set(doc.id, data);
+    return data;
+  });
+  
   const nomeLoja = new Map(lojas.map((l) => [l.id, l.nome]));
-  const pendentePorLoja = pendentePorLojaBruto
-    .map((item) => ({
-      lojaId: item.lojaId,
-      nome: nomeLoja.get(item.lojaId) ?? "Loja",
-      valor: item._sum.valorMontador ?? 0,
+
+  const rawMontagens = montagensSnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data() as any,
+    concluidoEm: doc.data().concluidoEm?.toDate() || new Date(0)
+  }));
+
+  // Apply optional lojaId filter
+  let filteredMontagens = rawMontagens;
+  if (lojaId) {
+    filteredMontagens = filteredMontagens.filter(m => m.lojaId === lojaId);
+  }
+
+  const pendenteAgg = filteredMontagens
+    .filter(m => !m.pagoAoMontador)
+    .reduce((soma, m) => soma + (m.valorMontador || 0), 0);
+
+  const recebidoAgg = filteredMontagens
+    .filter(m => m.pagoAoMontador)
+    .reduce((soma, m) => soma + (m.valorMontador || 0), 0);
+
+  const montagensPeriodo = filteredMontagens.filter(m => m.concluidoEm >= inicio && m.concluidoEm < fim);
+
+  const periodoAgg = montagensPeriodo.reduce((soma, m) => soma + (m.valorMontador || 0), 0);
+  const periodoCount = montagensPeriodo.length;
+
+  const pendentePorLojaMap = new Map<string, number>();
+  if (!lojaId) {
+    filteredMontagens.filter(m => !m.pagoAoMontador).forEach(m => {
+      const current = pendentePorLojaMap.get(m.lojaId) || 0;
+      pendentePorLojaMap.set(m.lojaId, current + (m.valorMontador || 0));
+    });
+  }
+
+  const pendentePorLoja = Array.from(pendentePorLojaMap.entries())
+    .map(([idLoja, valor]) => ({
+      lojaId: idLoja,
+      nome: nomeLoja.get(idLoja) ?? "Loja Excluída",
+      valor,
     }))
-    .filter((item) => item.valor > 0)
+    .filter(item => item.valor > 0)
     .sort((a, b) => b.valor - a.valor);
+
+  const historico = montagensPeriodo
+    .sort((a, b) => b.concluidoEm.getTime() - a.concluidoEm.getTime())
+    .map(m => ({
+      ...m,
+      loja: lojasMap.get(m.lojaId) || { nome: "Loja Excluída" }
+    }));
 
   return (
     <div>
@@ -112,14 +119,14 @@ export default async function FinanceiroMontadorPage({
       <div className="mb-6 grid grid-cols-1 gap-4 min-[420px]:grid-cols-2">
         <StatCard
           titulo="Pendente de receber"
-          valor={formatarMoeda(pendenteAgg._sum.valorMontador)}
+          valor={formatarMoeda(pendenteAgg)}
           sub="Concluídas, aguardando pagamento"
           cor="text-amber-600"
           icone="⏳"
         />
         <StatCard
           titulo="Já recebido"
-          valor={formatarMoeda(recebidoAgg._sum.valorMontador)}
+          valor={formatarMoeda(recebidoAgg)}
           sub="Total pago até hoje"
           cor="text-emerald-600"
           icone="✅"
@@ -146,7 +153,7 @@ export default async function FinanceiroMontadorPage({
       <div className="mb-8 grid grid-cols-1 gap-4 min-[420px]:grid-cols-2">
         <StatCard
           titulo="Ganho no período"
-          valor={formatarMoeda(periodoAgg._sum.valorMontador)}
+          valor={formatarMoeda(periodoAgg)}
           icone="📈"
         />
         <StatCard titulo="Montagens concluídas" valor={String(periodoCount)} icone="📋" />

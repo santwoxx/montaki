@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { requireMontador } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import {
   atualizarClienteMontadorAction,
   atualizarStatusAction,
@@ -42,13 +42,52 @@ export default async function MontagemDetalheMontadorPage({
   const { id } = await params;
   const { erro, sucesso } = await searchParams;
 
-  const montagem = await prisma.montagem.findUnique({
-    where: { id },
-    include: { loja: true, avaliacao: true, ocorrencias: { orderBy: { criadoEm: "desc" } } },
-  });
+  const [
+    montagemDoc,
+    avaliacoesSnapshot,
+    ocorrenciasSnapshot
+  ] = await Promise.all([
+    adminDb.collection("montagens").doc(id).get(),
+    adminDb.collection("avaliacoes").where("montagemId", "==", id).limit(1).get(),
+    adminDb.collection("ocorrencias").where("montagemId", "==", id).get(),
+  ]);
 
-  if (!montagem) notFound();
-  if (montagem.montadorId !== session.sub) redirect("/montador");
+  if (!montagemDoc.exists) notFound();
+
+  const montagemBase = montagemDoc.data() as any;
+
+  if (montagemBase.montadorId !== session.sub) redirect("/montador");
+
+  let loja = { nome: "Loja Excluída" };
+  if (montagemBase.lojaId) {
+    const lojaDoc = await adminDb.collection("lojas").doc(montagemBase.lojaId).get();
+    if (lojaDoc.exists) {
+      loja = { ...lojaDoc.data(), id: lojaDoc.id } as any;
+    }
+  }
+
+  const avaliacao = avaliacoesSnapshot.empty ? null : {
+    id: avaliacoesSnapshot.docs[0].id,
+    ...avaliacoesSnapshot.docs[0].data(),
+    criadoEm: avaliacoesSnapshot.docs[0].data().criadoEm?.toDate()
+  };
+
+  const ocorrencias = ocorrenciasSnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...(doc.data() as any),
+    criadoEm: doc.data().criadoEm?.toDate() || new Date(0)
+  })).sort((a, b) => b.criadoEm.getTime() - a.criadoEm.getTime());
+
+  const montagem = {
+    id,
+    ...montagemBase,
+    dataAgendada: montagemBase.dataAgendada?.toDate() || null,
+    concluidoEm: montagemBase.concluidoEm?.toDate() || null,
+    avaliacaoSolicitadaEm: montagemBase.avaliacaoSolicitadaEm?.toDate() || null,
+    loja,
+    avaliacao,
+    ocorrencias
+  };
 
   return (
     <div>
@@ -62,8 +101,8 @@ export default async function MontagemDetalheMontadorPage({
         titulo={montagem.clienteNome}
         descricao={montagem.loja.nome}
         acoes={
-          <Badge className={STATUS_COLOR[montagem.status]}>
-            {STATUS_LABEL[montagem.status]}
+          <Badge className={STATUS_COLOR[montagem.status as keyof typeof STATUS_COLOR]}>
+            {STATUS_LABEL[montagem.status as keyof typeof STATUS_LABEL]}
           </Badge>
         }
       />
@@ -172,19 +211,19 @@ export default async function MontagemDetalheMontadorPage({
         <Card>
           <p className="text-sm font-medium text-slate-500">Sua comissão</p>
           <p className="mt-1 text-2xl font-bold text-slate-900">
-            {formatarMoeda(montagem.valorMontador)}
+            {formatarMoeda(montagem.valorMontador || 0)}
           </p>
           <div className="mt-3 space-y-1.5 border-t border-slate-100 pt-3 text-sm">
             <div className="flex items-center justify-between text-slate-600">
               <span>Valor do produto/serviço</span>
               <span className="font-medium text-slate-900">
-                {formatarMoeda(montagem.valorServico)}
+                {formatarMoeda(montagem.valorServico || 0)}
               </span>
             </div>
             <div className="flex items-center justify-between text-slate-600">
               <span>Sua comissão ({montagem.percentualMontador}%)</span>
               <span className="font-medium text-slate-900">
-                {formatarMoeda(montagem.valorMontador)}
+                {formatarMoeda(montagem.valorMontador || 0)}
               </span>
             </div>
           </div>
@@ -233,11 +272,11 @@ export default async function MontagemDetalheMontadorPage({
               Histórico de ocorrências
             </p>
             <div className="space-y-3">
-              {montagem.ocorrencias.map((o) => (
+              {montagem.ocorrencias.map((o: any) => (
                 <div key={o.id} className="rounded-lg border border-slate-100 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <Badge className={OCORRENCIA_COLOR[o.tipo]}>
-                      {OCORRENCIA_LABEL[o.tipo]}
+                    <Badge className={OCORRENCIA_COLOR[o.tipo as keyof typeof OCORRENCIA_COLOR]}>
+                      {OCORRENCIA_LABEL[o.tipo as keyof typeof OCORRENCIA_LABEL]}
                     </Badge>
                     <span className="text-xs text-slate-400">
                       {formatarDataHora(o.criadoEm)}
@@ -263,7 +302,7 @@ export default async function MontagemDetalheMontadorPage({
         {montagem.status === "CONCLUIDO" ? (
           <>
             <p className="text-center text-sm text-slate-500">
-              Montagem concluída em {formatarData(montagem.concluidoEm)}.
+              Montagem concluída em {montagem.concluidoEm ? formatarData(montagem.concluidoEm) : "Data não disponível"}.
             </p>
             {montagem.fotoProdutoUrl || montagem.assinaturaMontador || montagem.assinaturaCliente ? (
               <Card>

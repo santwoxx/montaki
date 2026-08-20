@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireMontador } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import { Badge, Card, PageHeader, StatCard, Vazio } from "@/components/ui";
 import { Estrelas } from "@/components/Estrelas";
 import { formatarData, formatarMoeda, STATUS_COLOR, STATUS_LABEL } from "@/lib/format";
@@ -13,55 +13,80 @@ export default async function PainelMontadorPage() {
   inicioMes.setHours(0, 0, 0, 0);
 
   const [
-    ativas,
-    concluidasRecentes,
-    valorPendenteAgg,
-    aReceberAgg,
-    faturamentoMesAgg,
-    avaliacaoAgg,
-    avaliacoesRecentes,
+    montagensSnapshot,
+    avaliacoesSnapshot,
+    lojasSnapshot
   ] = await Promise.all([
-    prisma.montagem.findMany({
-      where: { montadorId: session.sub, status: { in: ["PENDENTE", "EM_ANDAMENTO"] } },
-      orderBy: [{ dataAgendada: "asc" }, { createdAt: "asc" }],
-      include: { loja: true },
-    }),
-    prisma.montagem.findMany({
-      where: { montadorId: session.sub, status: "CONCLUIDO" },
-      orderBy: { concluidoEm: "desc" },
-      take: 5,
-      include: { loja: true },
-    }),
-    prisma.montagem.aggregate({
-      _sum: { valorMontador: true },
-      where: { montadorId: session.sub, status: { in: ["PENDENTE", "EM_ANDAMENTO"] } },
-    }),
-    prisma.montagem.aggregate({
-      _sum: { valorMontador: true },
-      where: { montadorId: session.sub, createdAt: { gte: inicioMes }, status: { not: "CANCELADO" } },
-    }),
-    // Espelha o "Faturamento do mês" do painel do admin: valor BRUTO
-    // (valorServico) das montagens designadas ao montador no mês, não o
-    // ganho dele (isso é o card "A receber", que aplica a % da comissão).
-    prisma.montagem.aggregate({
-      _sum: { valorServico: true },
-      where: { montadorId: session.sub, createdAt: { gte: inicioMes }, status: { not: "CANCELADO" } },
-    }),
-    prisma.avaliacao.aggregate({
-      _avg: { estrelas: true },
-      _count: { _all: true },
-      where: { montadorId: session.sub },
-    }),
-    prisma.avaliacao.findMany({
-      where: { montadorId: session.sub },
-      orderBy: { criadoEm: "desc" },
-      take: 3,
-      include: { montagem: { select: { clienteNome: true } } },
-    }),
+    adminDb.collection("montagens").where("montadorId", "==", session.sub).get(),
+    adminDb.collection("avaliacoes").where("montadorId", "==", session.sub).get(),
+    adminDb.collection("lojas").get(),
   ]);
 
-  const mediaAvaliacao = avaliacaoAgg._avg.estrelas ?? 0;
-  const totalAvaliacoes = avaliacaoAgg._count._all;
+  const lojasMap = new Map();
+  lojasSnapshot.docs.forEach(doc => lojasMap.set(doc.id, doc.data()));
+
+  const rawMontagens = montagensSnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data() as any,
+    criadoEm: doc.data().criadoEm?.toDate() || new Date(0),
+    dataAgendada: doc.data().dataAgendada?.toDate() || null,
+    concluidoEm: doc.data().concluidoEm?.toDate() || null,
+  }));
+
+  let ativas = rawMontagens
+    .filter(m => m.status === "PENDENTE" || m.status === "EM_ANDAMENTO")
+    .map(m => ({ ...m, loja: lojasMap.get(m.lojaId) || { nome: "Loja Excluída" } }));
+
+  ativas.sort((a, b) => {
+    if (a.dataAgendada && !b.dataAgendada) return -1;
+    if (!a.dataAgendada && b.dataAgendada) return 1;
+    if (a.dataAgendada && b.dataAgendada) {
+      if (a.dataAgendada.getTime() !== b.dataAgendada.getTime()) {
+        return a.dataAgendada.getTime() - b.dataAgendada.getTime();
+      }
+    }
+    return a.criadoEm.getTime() - b.criadoEm.getTime();
+  });
+
+  let concluidasRecentes = rawMontagens
+    .filter(m => m.status === "CONCLUIDO")
+    .map(m => ({ ...m, loja: lojasMap.get(m.lojaId) || { nome: "Loja Excluída" } }));
+
+  concluidasRecentes.sort((a, b) => (b.concluidoEm?.getTime() || 0) - (a.concluidoEm?.getTime() || 0));
+  concluidasRecentes = concluidasRecentes.slice(0, 5);
+
+  const valorPendenteAgg = rawMontagens
+    .filter(m => m.status === "PENDENTE" || m.status === "EM_ANDAMENTO")
+    .reduce((soma, m) => soma + (m.valorMontador || 0), 0);
+
+  const aReceberAgg = rawMontagens
+    .filter(m => m.status !== "CANCELADO" && m.criadoEm >= inicioMes)
+    .reduce((soma, m) => soma + (m.valorMontador || 0), 0);
+
+  const faturamentoMesAgg = rawMontagens
+    .filter(m => m.status !== "CANCELADO" && m.criadoEm >= inicioMes)
+    .reduce((soma, m) => soma + (m.valorServico || 0), 0);
+
+  const rawAvaliacoes = avaliacoesSnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data() as any,
+    criadoEm: doc.data().criadoEm?.toDate() || new Date(0)
+  }));
+
+  const totalAvaliacoes = rawAvaliacoes.length;
+  const mediaAvaliacao = totalAvaliacoes > 0
+    ? rawAvaliacoes.reduce((soma, a) => soma + (a.estrelas || 0), 0) / totalAvaliacoes
+    : 0;
+
+  rawAvaliacoes.sort((a, b) => b.criadoEm.getTime() - a.criadoEm.getTime());
+
+  const avaliacoesRecentes = rawAvaliacoes.slice(0, 3).map(a => {
+    const m = rawMontagens.find(mont => mont.id === a.montagemId);
+    return {
+      ...a,
+      montagem: { clienteNome: m ? m.clienteNome : "Desconhecido" }
+    };
+  });
 
   return (
     <div>
@@ -71,21 +96,21 @@ export default async function PainelMontadorPage() {
         <StatCard titulo="Montagens pendentes" valor={String(ativas.length)} cor="text-amber-600" icone="⏳" />
         <StatCard
           titulo="Valor pendente"
-          valor={formatarMoeda(valorPendenteAgg._sum.valorMontador)}
+          valor={formatarMoeda(valorPendenteAgg)}
           sub="Montagens ainda não concluídas"
           cor="text-amber-600"
           icone="🧾"
         />
         <StatCard
           titulo="A receber"
-          valor={formatarMoeda(aReceberAgg._sum.valorMontador)}
+          valor={formatarMoeda(aReceberAgg)}
           sub="Sua parte sobre as montagens do mês"
           cor="text-emerald-600"
           icone="💰"
         />
         <StatCard
           titulo="Faturamento do mês"
-          valor={formatarMoeda(faturamentoMesAgg._sum.valorServico)}
+          valor={formatarMoeda(faturamentoMesAgg)}
           sub="Valor total das montagens do mês"
           cor="text-blue-600"
           icone="📈"
@@ -149,7 +174,9 @@ export default async function PainelMontadorPage() {
                       </span>
                     </p>
                   </div>
-                  <Badge className={STATUS_COLOR[m.status]}>{STATUS_LABEL[m.status]}</Badge>
+                  <Badge className={STATUS_COLOR[m.status as keyof typeof STATUS_COLOR]}>
+                    {STATUS_LABEL[m.status as keyof typeof STATUS_LABEL]}
+                  </Badge>
                 </div>
               </Card>
             </Link>
@@ -172,7 +199,7 @@ export default async function PainelMontadorPage() {
                     <p className="font-semibold text-slate-900">{m.clienteNome}</p>
                     <p className="text-sm text-slate-500">{m.loja.nome}</p>
                     <p className="mt-1 text-xs text-slate-400">
-                      Concluída em {formatarData(m.concluidoEm)}
+                      Concluída em {m.concluidoEm ? formatarData(m.concluidoEm) : "Data não disponível"}
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
                       Nota: {formatarMoeda(m.valorServico)} · Você recebe:{" "}

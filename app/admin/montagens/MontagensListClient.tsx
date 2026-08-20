@@ -72,7 +72,7 @@ export default function MontagensListClient({
             </span>
             <div className="flex gap-2">
               <Button
-                variant="outline"
+                variante="secundario"
                 type="button"
                 onClick={() => {
                   setSelecaoAtiva(false);
@@ -91,7 +91,7 @@ export default function MontagensListClient({
             </div>
           </div>
         ) : (
-          <Button type="button" variant="outline" onClick={() => setSelecaoAtiva(true)}>
+          <Button type="button" variante="secundario" onClick={() => setSelecaoAtiva(true)}>
             Selecionar para Orçamento
           </Button>
         )}

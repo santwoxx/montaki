@@ -26,7 +26,7 @@ export default function LinkClient({ orcamentoId }: { orcamentoId: string }) {
     <div className="space-y-3">
       <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg overflow-hidden">
         <span className="truncate text-sm text-slate-600 mr-2">{link}</span>
-        <Button variant="outline" size="sm" onClick={handleCopy} className="shrink-0">
+        <Button variante="secundario" onClick={handleCopy} className="shrink-0 text-sm px-3 py-2 sm:px-3 sm:py-2">
           {copiado ? "Copiado!" : "Copiar"}
         </Button>
       </div>

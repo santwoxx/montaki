@@ -32,15 +32,16 @@ export default function OrcamentoActionsClient({ orcamentoId }: { orcamentoId: s
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:gap-4 mt-6">
       <Button
-        className="w-full bg-green-600 hover:bg-green-700 text-white border-transparent"
+        variante="sucesso"
+        className="w-full"
         onClick={() => handleAction("APROVAR")}
         disabled={isSubmitting}
       >
         {isSubmitting ? "Processando..." : "Aprovar Orçamento"}
       </Button>
       <Button
-        variant="outline"
-        className="w-full text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+        variante="perigo"
+        className="w-full"
         onClick={() => {
           if (confirm("Tem certeza que deseja recusar este orçamento?")) {
             handleAction("REJEITAR");

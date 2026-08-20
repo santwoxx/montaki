@@ -3,8 +3,8 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { put } from "@vercel/blob";
-import { prisma } from "@/lib/prisma";
-import { createSession, requireMontador } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase-admin";
+import { requireMontador } from "@/lib/auth";
 
 export async function atualizarPerfilAction(formData: FormData) {
   const session = await requireMontador();
@@ -39,18 +39,15 @@ export async function atualizarPerfilAction(formData: FormData) {
     fotoUrl = blob.url;
   }
 
-  await prisma.user.update({
-    where: { id: session.sub },
-    data: {
-      nome,
-      telefone: telefone || null,
-      ...(fotoUrl ? { fotoUrl } : {}),
-    },
-  });
+  const updateData: any = {
+    nome,
+    telefone: telefone || null,
+  };
+  if (fotoUrl) {
+    updateData.fotoUrl = fotoUrl;
+  }
 
-  // O cookie de sessão guarda o nome desde o login; atualiza para refletir
-  // a mudança imediatamente (sem precisar deslogar e logar de novo).
-  await createSession({ sub: session.sub, role: session.role, nome });
+  await adminDb.collection("users").doc(session.sub).update(updateData);
 
   revalidatePath("/montador");
   revalidatePath("/montador/perfil");

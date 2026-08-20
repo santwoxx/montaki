@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import { criarMontagemAction } from "@/lib/actions/montagens";
 import { Alerta, Card, PageHeader } from "@/components/ui";
 import { NovaMontagemForm } from "@/components/NovaMontagemForm";
@@ -11,35 +11,47 @@ export default async function NovaMontagemPage({
 }) {
   const { erro } = await searchParams;
 
-  const [lojas, montadores, comissoes, notasPendentesBrutas] = await Promise.all([
-    prisma.loja.findMany({ where: { ativo: true }, orderBy: { nome: "asc" } }),
-    prisma.user.findMany({
-      where: { role: "MONTADOR", ativo: true },
-      orderBy: { nome: "asc" },
-    }),
-    prisma.comissaoLoja.findMany(),
-    prisma.notaPendente.findMany({
-      orderBy: { criadaEm: "asc" },
-      include: { montadorSugerido: { select: { nome: true } } },
-    }),
+  const [lojasSnapshot, montadoresSnapshot, comissoesSnapshot, notasPendentesSnapshot] = await Promise.all([
+    adminDb.collection("lojas").where("ativo", "==", true).orderBy("nome", "asc").get(),
+    adminDb.collection("users").where("role", "==", "MONTADOR").where("ativo", "==", true).orderBy("nome", "asc").get(),
+    adminDb.collection("comissoesLoja").get(),
+    adminDb.collection("notasPendentes").orderBy("criadaEm", "asc").get(),
   ]);
 
-  const notasPendentes = notasPendentesBrutas.map((n) => ({
-    id: n.id,
-    numeroPedido: n.numeroPedido,
-    clienteNome: n.clienteNome,
-    clienteTelefone: n.clienteTelefone,
-    clienteEndereco: n.clienteEndereco,
-    descricaoServico: n.descricaoServico,
-    valorServico: n.valorServico,
-    dataAgendada: n.dataAgendada ? n.dataAgendada.toISOString() : null,
-    observacoes: n.observacoes,
-    fotoReferenciaUrl: n.fotoReferenciaUrl,
-    montadorSugeridoId: n.montadorSugeridoId,
-    montadorSugeridoNome: n.montadorSugerido?.nome ?? null,
-    lojaNomeSugerida: n.lojaNomeSugerida,
-    lojaCnpjSugerido: n.lojaCnpjSugerido,
-  }));
+  const lojas = lojasSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+  
+  const montadores = montadoresSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+  
+  const comissoes = comissoesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+
+  const notasPendentesBrutas = notasPendentesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+  
+  const notasPendentes = notasPendentesBrutas.map((n) => {
+    let montadorSugeridoNome = null;
+    if (n.montadorSugeridoId) {
+      const montadorDoc = montadores.find(m => m.id === n.montadorSugeridoId);
+      if (montadorDoc) {
+        montadorSugeridoNome = montadorDoc.nome;
+      }
+    }
+
+    return {
+      id: n.id,
+      numeroPedido: n.numeroPedido || null,
+      clienteNome: n.clienteNome || "",
+      clienteTelefone: n.clienteTelefone || null,
+      clienteEndereco: n.clienteEndereco || "",
+      descricaoServico: n.descricaoServico || "",
+      valorServico: n.valorServico || 0,
+      dataAgendada: n.dataAgendada ? n.dataAgendada.toDate().toISOString() : null,
+      observacoes: n.observacoes || null,
+      fotoReferenciaUrl: n.fotoReferenciaUrl || null,
+      montadorSugeridoId: n.montadorSugeridoId || null,
+      montadorSugeridoNome,
+      lojaNomeSugerida: n.lojaNomeSugerida || null,
+      lojaCnpjSugerido: n.lojaCnpjSugerido || null,
+    };
+  });
 
   return (
     <div>

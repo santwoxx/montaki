@@ -20,8 +20,6 @@ export const tabelaPrecos: ItemTabelaPreco[] = [
   { id: "s7", nome: "Multiuso grande", precoBase: 99, precoFormatado: "R$ 99,00", categoria: "Principal" },
   { id: "s8", nome: "Cama solteiro", precoBase: 88, precoFormatado: "R$ 88,00", categoria: "Principal" },
   { id: "s9", nome: "Cama casal", precoBase: 110, precoFormatado: "R$ 110,00", categoria: "Principal" },
-  { id: "s10", nome: "Cama box", precoBase: 77, precoFormatado: "R$ 77,00", categoria: "Principal" },
-  { id: "s11", nome: "Cama box baú", precoBase: 132, precoFormatado: "R$ 132,00", categoria: "Principal" },
   { id: "s12", nome: "Beliche", precoBase: 143, precoFormatado: "R$ 143,00", categoria: "Principal" },
   { id: "s13", nome: "Guarda-roupa 2 portas", precoBase: 110, precoFormatado: "R$ 110,00", categoria: "Principal" },
   { id: "s14", nome: "Guarda-roupa 3 portas", precoBase: 143, precoFormatado: "R$ 143,00", categoria: "Principal" },

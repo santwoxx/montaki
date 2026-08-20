@@ -213,27 +213,33 @@ export default function SolicitarOrcamentoClient() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 space-y-8">
-      {/* Header */}
-      <div className="rounded-2xl bg-navy p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
+      {/* Header com identidade visual Montaki (Amarelo, Vermelho e Verde) */}
+      <div className="rounded-2xl bg-gradient-to-r from-red-900 via-red-800 to-slate-950 p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-red-700/40">
+        <div className="absolute inset-0 opacity-15 bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-amber-300 via-yellow-500 to-transparent"></div>
         <div className="relative z-10 flex flex-col sm:flex-row items-center justify-between gap-6">
           <div className="text-center sm:text-left space-y-2">
             <div className="flex items-center justify-center sm:justify-start gap-2">
               <Logo tamanho="sm" />
-              <span className="text-xs font-bold uppercase tracking-widest text-gold">Montaki Serviços</span>
+              <span className="text-xs font-bold uppercase tracking-widest text-amber-300 bg-black/40 px-2.5 py-0.5 rounded-full border border-amber-300/30">
+                Montaki Serviços
+              </span>
+              <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                ● Atendimento Online
+              </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold font-display">
               Solicitar Orçamento Online
             </h1>
-            <p className="text-sm text-slate-300 max-w-xl">
+            <p className="text-sm text-amber-100/90 max-w-xl">
               Monte seu pacote de montagem abaixo. Veja o valor estimado na hora e envie direto para nossa equipe!
             </p>
           </div>
           <div className="shrink-0 flex gap-2">
             <Link
               href="/tabela-precos"
-              className="rounded-xl bg-white/10 hover:bg-white/20 px-4 py-2 text-xs font-bold text-white transition-all backdrop-blur-sm border border-white/10"
+              className="rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 px-4 py-2.5 text-xs font-bold transition-all shadow-md font-display uppercase tracking-wide"
             >
-              📋 Ver Tabela Completa
+              📋 Tabela Oficial
             </Link>
           </div>
         </div>
@@ -536,18 +542,29 @@ export default function SolicitarOrcamentoClient() {
       </form>
 
       {/* Regras Comerciais */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
-        <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+      <div className="rounded-2xl border-2 border-red-200 bg-red-50/40 p-6 shadow-sm space-y-4">
+        <h2 className="text-base font-bold text-red-900 flex items-center gap-2">
           <span>📋</span> Regras Comerciais & Condições de Montagem
         </h2>
-        <div className="grid gap-2 sm:grid-cols-2 text-xs text-slate-600">
+        <div className="grid gap-2 sm:grid-cols-2 text-xs text-red-950/80">
           {regrasComerciais.map((regra, i) => (
             <div key={i} className="flex items-start gap-2">
-              <span className="text-gold font-bold">✔</span>
+              <span className="text-red-600 font-bold">✔</span>
               <span>{regra}</span>
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Banner de Compromisso Montaki */}
+      <div className="rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 p-4 text-slate-950 font-black text-center shadow-lg border border-amber-300 font-display tracking-widest text-sm sm:text-base flex items-center justify-center gap-3">
+        <span>🔧</span>
+        <span>QUALIDADE</span>
+        <span className="text-red-600">•</span>
+        <span>SEGURANÇA</span>
+        <span className="text-red-600">•</span>
+        <span>AGILIDADE</span>
+        <span>🔧</span>
       </div>
     </div>
   );

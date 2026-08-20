@@ -87,12 +87,13 @@ export function NavBar({
   return (
     <>
       <header className="sticky top-0 z-10 border-b border-navy-light bg-navy/95 backdrop-blur-sm shadow-md">
+        <div className="h-1 w-full bg-gradient-to-r from-amber-400 via-red-600 to-emerald-500" />
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
           <div className="flex items-center gap-3">
             <Logo tamanho="sm" />
             <div className="leading-tight">
               <p className="text-lg font-bold text-white uppercase tracking-wide font-display">
-                Mont<span className="text-gold">aki</span>
+                Mont<span className="text-amber-400">a</span><span className="text-red-500">ki</span>
               </p>
               <p className="text-xs text-slate-400 font-sans">{titulo}</p>
             </div>

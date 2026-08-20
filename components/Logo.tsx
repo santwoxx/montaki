@@ -25,7 +25,7 @@ export function Logo({
   return (
     <span
       className={cx(
-        "flex shrink-0 items-center justify-center bg-linear-to-br from-gold to-gold-hover text-white shadow-sm shadow-gold/30",
+        "flex shrink-0 items-center justify-center bg-gradient-to-br from-amber-400 via-amber-500 to-red-600 text-slate-950 shadow-md shadow-amber-500/20 ring-1 ring-amber-400/40",
         caixa,
         className
       )}

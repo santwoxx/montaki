@@ -2,17 +2,26 @@
 
 :root {
   color-scheme: light;
-  --background: #f4f6f9;
-  --foreground: #171512; /* Preto Montaki */
+  --background: #f8fafc;
+  --foreground: #171512;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-navy: #171512;
-  --color-navy-light: #2b2721;
-  --color-gold: #d9a521;
-  --color-gold-hover: #b98a15;
+  --color-navy-light: #24221f;
+  --color-gold: #f59e0b;
+  --color-gold-hover: #d97706;
+  --color-gold-light: #fef08a;
+  --color-yellow: #facc15;
+  --color-yellow-dark: #ca8a04;
+  --color-brand-red: #dc2626;
+  --color-brand-red-dark: #991b1b;
+  --color-brand-red-light: #fee2e2;
+  --color-brand-green: #16a34a;
+  --color-brand-green-dark: #15803d;
+  --color-brand-green-light: #dcfce7;
   --font-sans: var(--font-raleway);
   --font-display: var(--font-orbitron);
 }

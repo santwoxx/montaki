@@ -48,10 +48,11 @@ export default function LoginPage({
       });
       const userCredential = await signInWithPopup(auth, provider);
       
-      // Verifica se é o admin
-      if (userCredential.user.email !== "pedrobmcity@gmail.com") {
+      // Verifica se é um dos admins permitidos
+      const allowedAdmins = ["pedrobmcity@gmail.com", "brisasofc@gmail.com"];
+      if (!userCredential.user.email || !allowedAdmins.includes(userCredential.user.email)) {
         await auth.signOut();
-        setLocalError("Apenas o administrador (pedrobmcity@gmail.com) pode fazer login via Google.");
+        setLocalError("Apenas administradores autorizados podem fazer login via Google.");
         setLoading(false);
         return;
       }

@@ -19,6 +19,12 @@ enum StatusMontagem {
   CANCELADO
 }
 
+enum StatusOrcamento {
+  PENDENTE
+  APROVADO
+  REJEITADO
+}
+
 enum TipoOcorrencia {
   CLIENTE_AUSENTE
   PECA_DANIFICADA
@@ -104,6 +110,9 @@ model Montagem {
   montador    User?        @relation("MontagensDoMontador", fields: [montadorId], references: [id], onDelete: SetNull)
   avaliacao   Avaliacao?
   ocorrencias Ocorrencia[]
+  
+  orcamentoId String?
+  orcamento   Orcamento?   @relation(fields: [orcamentoId], references: [id], onDelete: SetNull)
 
   @@index([status])
   @@index([montadorId])
@@ -151,4 +160,16 @@ model Avaliacao {
 
   montagem Montagem @relation(fields: [montagemId], references: [id], onDelete: Cascade)
   montador User     @relation(fields: [montadorId], references: [id])
+}
+
+model Orcamento {
+  id        String          @id @default(cuid())
+  cliente   String?         
+  telefone  String?
+  status    StatusOrcamento @default(PENDENTE)
+  total     Float
+  criadoEm  DateTime        @default(now())
+  validoAte DateTime?
+  
+  montagens Montagem[]
 }

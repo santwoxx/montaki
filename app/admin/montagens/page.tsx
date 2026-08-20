@@ -1,8 +1,7 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import { Badge, Button, Card, LinkButton, PageHeader, Select, Vazio } from "@/components/ui";
 import { formatarData, formatarMoeda, STATUS_COLOR, STATUS_LABEL } from "@/lib/format";
-import type { Prisma, StatusMontagem } from "@/app/generated/prisma/client";
 import MontagensListClient from "./MontagensListClient";
 
 export default async function MontagensPage({
@@ -16,22 +15,78 @@ export default async function MontagensPage({
 }) {
   const { status, lojaId, montadorId } = await searchParams;
 
-  const [lojas, montadores] = await Promise.all([
-    prisma.loja.findMany({ orderBy: { nome: "asc" } }),
-    prisma.user.findMany({ where: { role: "MONTADOR" }, orderBy: { nome: "asc" } }),
+  const [lojasSnapshot, montadoresSnapshot] = await Promise.all([
+    adminDb.collection("lojas").orderBy("nome", "asc").get(),
+    adminDb.collection("users").where("role", "==", "MONTADOR").orderBy("nome", "asc").get(),
   ]);
 
-  const where: Prisma.MontagemWhereInput = {};
-  if (status) where.status = status as StatusMontagem;
-  if (lojaId) where.lojaId = lojaId;
-  if (montadorId) where.montadorId = montadorId === "nenhum" ? null : montadorId;
+  const lojas = lojasSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+  const montadores = montadoresSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
 
-  const montagens = await prisma.montagem.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    include: { loja: true, montador: true, _count: { select: { ocorrencias: true } } },
-    take: 100,
+  const lojasMap = new Map();
+  lojas.forEach(l => lojasMap.set(l.id, l));
+
+  const montadoresMap = new Map();
+  montadores.forEach(m => montadoresMap.set(m.id, m));
+
+  // Firebase allows basic chaining of wheres, but because we also want a dynamic amount of filters,
+  // we can use the adminDb.collection reference to chain conditionally.
+  let montagensRef: FirebaseFirestore.Query = adminDb.collection("montagens");
+
+  if (status) {
+    montagensRef = montagensRef.where("status", "==", status);
+  }
+  if (lojaId) {
+    montagensRef = montagensRef.where("lojaId", "==", lojaId);
+  }
+  if (montadorId) {
+    montagensRef = montagensRef.where("montadorId", "==", montadorId === "nenhum" ? null : montadorId);
+  }
+
+  // To avoid requiring complex composite indexes in Firestore for every combination of filters + orderBy,
+  // we fetch the filtered subset (up to a reasonable limit) and sort by createdAt in memory.
+  const montagensQuery = await montagensRef.limit(500).get();
+  
+  let rawMontagens = montagensQuery.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+
+  // Sort by createdAt desc
+  rawMontagens.sort((a, b) => {
+    const timeA = a.criadoEm?.toMillis() || 0;
+    const timeB = b.criadoEm?.toMillis() || 0;
+    return timeB - timeA;
   });
+
+  // Limit to 100 for display
+  rawMontagens = rawMontagens.slice(0, 100);
+
+  // For the selected montagens, we need the count of ocorrencias
+  // Fetching all ocorrencias for these IDs to get counts
+  const montagemIds = rawMontagens.map(m => m.id);
+  const ocorrenciasCountMap = new Map<string, number>();
+
+  if (montagemIds.length > 0) {
+    // Firestore "in" queries are limited to 30 items. We chunk it if needed.
+    const chunkArray = (arr: string[], size: number) => 
+      Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+
+    const chunks = chunkArray(montagemIds, 30);
+    for (const chunk of chunks) {
+      const occSnapshot = await adminDb.collection("ocorrencias").where("montagemId", "in", chunk).get();
+      occSnapshot.docs.forEach(doc => {
+        const data = doc.data();
+        const currentCount = ocorrenciasCountMap.get(data.montagemId) || 0;
+        ocorrenciasCountMap.set(data.montagemId, currentCount + 1);
+      });
+    }
+  }
+
+  const montagens = rawMontagens.map(m => ({
+    ...m,
+    loja: lojasMap.get(m.lojaId) || { nome: "Loja Excluída" },
+    montador: montadoresMap.get(m.montadorId) || null,
+    _count: { ocorrencias: ocorrenciasCountMap.get(m.id) || 0 },
+    dataAgendada: m.dataAgendada?.toDate() || null
+  }));
 
   return (
     <div>

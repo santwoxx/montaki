@@ -1,39 +1,24 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
-import { createSession, destroySession, verifyPassword } from "@/lib/auth";
+import { createSession, destroySession } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase-admin";
 
-export async function loginAction(formData: FormData) {
-  const email = String(formData.get("email") || "").trim().toLowerCase();
-  const senha = String(formData.get("senha") || "");
-  const proximo = String(formData.get("proximo") || "");
-  const sufixoProximo = proximo ? `&proximo=${encodeURIComponent(proximo)}` : "";
+export async function loginAction(idToken: string, proximo?: string) {
+  const sufixoProximo = proximo ? `?proximo=${encodeURIComponent(proximo)}` : "";
 
-  if (!email || !senha) {
-    redirect(
-      `/login?erro=${encodeURIComponent("Informe e-mail e senha.")}${sufixoProximo}`
-    );
+  if (!idToken) {
+    redirect(`/login${sufixoProximo}&erro=Token inválido`);
   }
 
-  let user;
   try {
-    user = await prisma.user.findUnique({ where: { email } });
+    await createSession(idToken);
   } catch (error) {
-    console.error("Erro de banco de dados no login:", error);
-    redirect(`/login?erro=${encodeURIComponent("Erro de conexão com o banco de dados.")}${sufixoProximo}`);
+    console.error("Erro ao iniciar sessão", error);
+    redirect(`/login${sufixoProximo}&erro=Falha ao iniciar sessão`);
   }
 
-  if (!user || !user.ativo || !user.senha || !(await verifyPassword(senha, user.senha))) {
-    redirect(
-      `/login?erro=${encodeURIComponent("E-mail ou senha inválidos.")}${sufixoProximo}`
-    );
-  }
-
-  await createSession({ sub: user.id, role: user.role, nome: user.nome });
-
-  const destino = proximo || (user.role === "ADMIN" ? "/admin" : "/montador");
-  redirect(destino);
+  redirect(proximo || "/admin"); // Redirecionamento padrão, você pode melhorar para verificar o papel
 }
 
 export async function logoutAction() {

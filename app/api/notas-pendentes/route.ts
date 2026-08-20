@@ -1,22 +1,7 @@
-import { prisma } from "@/lib/prisma";
+import { NextRequest, NextResponse } from "next/server";
+import { adminDb } from "@/lib/firebase-admin";
 import { normalizarCnpj } from "@/lib/cnpj";
 
-// Endpoint público chamado por um sistema externo (outro sistema seu, sem
-// sessão de login aqui — ex: um app de pedidos/entregas) quando um pedido é
-// designado a alguém da equipe por lá. Não cria uma Montagem de verdade —
-// só deixa o pedido em "Notas pendentes" (ver app/admin/montagens/nova) até
-// um admin revisar, completar loja/valor e clicar em salvar. Protegido por
-// uma chave compartilhada, não por sessão.
-//
-// Essa integração é totalmente opcional: sem EXTERNAL_INTEGRATION_API_KEY
-// configurada, este endpoint recusa todas as chamadas e o resto do sistema
-// funciona normalmente (notas pendentes continuam existindo para a
-// importação manual de XML/foto de nota).
-
-// Sem essa variável configurada, nenhum header de CORS é enviado (o
-// endpoint continua funcionando para chamadas do mesmo servidor/sem
-// preflight, mas navegadores de outra origem são bloqueados por padrão —
-// mais seguro do que liberar "*" sem um domínio real configurado).
 const ALLOWED_ORIGIN = process.env.EXTERNAL_INTEGRATION_ORIGIN;
 const TAMANHO_MAXIMO_CAMPO = 300;
 const TAMANHO_MAXIMO_TEXTO_LONGO = 2000;
@@ -99,10 +84,7 @@ export async function POST(request: Request) {
   const montadorSugeridoNome = textoValido(dados.montadorSugerido, TAMANHO_MAXIMO_CAMPO);
   const valorServico = numeroPositivoValido(dados.valorServico);
   const fotoReferenciaUrl = urlValida(dados.fotoReferenciaUrl, TAMANHO_MAXIMO_URL);
-  // Opcional: se o sistema externo informar a loja emitente (nome e/ou
-  // CNPJ), "Usar esta nota" já resolve/cadastra ela automaticamente — mesmo
-  // mecanismo da importação por OCR/XML. Sem isso, o admin escolhe a loja
-  // manualmente como já acontecia antes.
+  
   const lojaNomeSugerida = textoValido(dados.lojaNome, TAMANHO_MAXIMO_CAMPO);
   const lojaCnpjSugerido = normalizarCnpj(textoValido(dados.lojaCnpj, TAMANHO_MAXIMO_CAMPO)) ?? undefined;
 
@@ -115,29 +97,35 @@ export async function POST(request: Request) {
 
   let montadorSugeridoId: string | undefined;
   if (montadorSugeridoNome) {
-    const montador = await prisma.user.findFirst({
-      where: { role: "MONTADOR", ativo: true, nome: { equals: montadorSugeridoNome, mode: "insensitive" } },
-      select: { id: true },
-    });
-    montadorSugeridoId = montador?.id;
+    const usersSnapshot = await adminDb.collection("users")
+      .where("role", "==", "MONTADOR")
+      .where("ativo", "==", true)
+      .where("nome", "==", montadorSugeridoNome) // Firebase requires exact match, case sensitive. For insensitive we'd need another field or search tool like Algolia.
+      .limit(1)
+      .get();
+      
+    if (!usersSnapshot.empty) {
+      montadorSugeridoId = usersSnapshot.docs[0].id;
+    }
   }
 
-  const notaPendente = await prisma.notaPendente.create({
-    data: {
-      numeroPedido,
-      clienteNome,
-      clienteTelefone,
-      clienteEndereco,
-      descricaoServico,
-      valorServico,
-      dataAgendada,
-      observacoes,
-      fotoReferenciaUrl,
-      montadorSugeridoId,
-      lojaNomeSugerida,
-      lojaCnpjSugerido,
-    },
-  });
+  const notaData = {
+    numeroPedido: numeroPedido || null,
+    clienteNome,
+    clienteTelefone: clienteTelefone || null,
+    clienteEndereco,
+    descricaoServico,
+    valorServico: valorServico || null,
+    dataAgendada: dataAgendada || null,
+    observacoes: observacoes || null,
+    fotoReferenciaUrl: fotoReferenciaUrl || null,
+    montadorSugeridoId: montadorSugeridoId || null,
+    lojaNomeSugerida: lojaNomeSugerida || null,
+    lojaCnpjSugerido: lojaCnpjSugerido || null,
+    criadaEm: new Date(),
+  };
 
-  return jsonResponse(201, { ok: true, id: notaPendente.id });
+  const notaPendenteRef = await adminDb.collection("notasPendentes").add(notaData);
+
+  return jsonResponse(201, { ok: true, id: notaPendenteRef.id });
 }

@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import { getSession } from "@/lib/auth";
 import { apenasDigitos } from "@/lib/format";
 
@@ -30,8 +30,11 @@ export async function gerarLinkAvaliacaoAction(
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const montagem = await prisma.montagem.findUnique({ where: { id } });
-  if (!montagem) return { ok: false, erro: "Montagem não encontrada." };
+  const montagemDoc = await adminDb.collection("montagens").doc(id).get();
+  if (!montagemDoc.exists) return { ok: false, erro: "Montagem não encontrada." };
+  
+  const montagem = montagemDoc.data() as any;
+
   if (session.role === "MONTADOR" && montagem.montadorId !== session.sub) {
     return { ok: false, erro: "Você não tem acesso a esta montagem." };
   }
@@ -49,11 +52,11 @@ export async function gerarLinkAvaliacaoAction(
   }
 
   const baseUrl = await obterUrlBase();
-  const linkAvaliacao = `${baseUrl}/avaliar/${montagem.id}`;
+  const linkAvaliacao = `${baseUrl}/avaliar/${id}`;
 
-  await prisma.montagem.update({
-    where: { id },
-    data: { avaliacaoSolicitadaEm: new Date() },
+  await adminDb.collection("montagens").doc(id).update({
+    avaliacaoSolicitadaEm: new Date(),
+    atualizadoEm: new Date()
   });
 
   revalidatePath(`/montador/montagens/${id}`);
@@ -82,16 +85,25 @@ export async function enviarAvaliacaoAction(id: string, formData: FormData) {
   const erro = (mensagem: string) =>
     redirect(`/avaliar/${id}?erro=${encodeURIComponent(mensagem)}`);
 
-  const montagem = await prisma.montagem.findUnique({ where: { id } });
-  if (!montagem || montagem.status !== "CONCLUIDO" || !montagem.montadorId) {
+  const montagemDoc = await adminDb.collection("montagens").doc(id).get();
+  if (!montagemDoc.exists) {
+    erro("Este link de avaliação não está mais disponível.");
+    return;
+  }
+  
+  const montagem = montagemDoc.data() as any;
+  if (montagem.status !== "CONCLUIDO" || !montagem.montadorId) {
     erro("Este link de avaliação não está mais disponível.");
     return;
   }
 
-  const jaAvaliada = await prisma.avaliacao.findUnique({
-    where: { montagemId: id },
-  });
-  if (jaAvaliada) {
+  const avaliacaoSnapshot = await adminDb
+    .collection("avaliacoes")
+    .where("montagemId", "==", id)
+    .limit(1)
+    .get();
+
+  if (!avaliacaoSnapshot.empty) {
     redirect(`/avaliar/${id}`);
     return;
   }
@@ -109,12 +121,15 @@ export async function enviarAvaliacaoAction(id: string, formData: FormData) {
   const montadorId = montagem.montadorId;
 
   try {
-    await prisma.avaliacao.create({
-      data: { montagemId: id, montadorId, estrelas, comentario },
+    await adminDb.collection("avaliacoes").add({
+      montagemId: id,
+      montadorId,
+      estrelas,
+      comentario,
+      criadoEm: new Date()
     });
   } catch {
-    // Duas tentativas quase simultâneas: a restrição única já garantiu que
-    // só uma avaliação foi criada. Segue para a tela de agradecimento.
+    // Falha silenciosa igual ao prisma original
   }
 
   revalidatePath(`/admin/montadores/${montadorId}`);

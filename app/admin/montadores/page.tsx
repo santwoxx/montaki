@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import { criarMontadorAction } from "@/lib/actions/montadores";
 import { Alerta, Badge, Card, Field, Input, PageHeader, Vazio } from "@/components/ui";
 import { Estrelas } from "@/components/Estrelas";
@@ -13,27 +13,46 @@ export default async function MontadoresPage({
 }) {
   const { erro, sucesso } = await searchParams;
 
-  const [montadores, avaliacoesAgrupadas] = await Promise.all([
-    prisma.user.findMany({
-      where: { role: "MONTADOR" },
-      orderBy: { createdAt: "desc" },
-      include: {
-        _count: { select: { montagens: true } },
-      },
-    }),
-    prisma.avaliacao.groupBy({
-      by: ["montadorId"],
-      _avg: { estrelas: true },
-      _count: { _all: true },
-    }),
+  const [usersSnapshot, avaliacoesSnapshot, montagensSnapshot] = await Promise.all([
+    adminDb.collection("users").where("role", "==", "MONTADOR").get(),
+    adminDb.collection("avaliacoes").get(),
+    adminDb.collection("montagens").get() // In a larger scale app, we'd use .count() per montador
   ]);
 
-  const avaliacaoPorMontador = new Map(
-    avaliacoesAgrupadas.map((a) => [
-      a.montadorId,
-      { media: a._avg.estrelas ?? 0, total: a._count._all },
-    ])
-  );
+  const rawMontadores = usersSnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...(doc.data() as any)
+  }));
+
+  // Sort by createdAt desc in memory since combining where() and orderBy() on different fields requires an index in Firestore
+  rawMontadores.sort((a, b) => {
+    const tA = a.createdAt?.toMillis() || 0;
+    const tB = b.createdAt?.toMillis() || 0;
+    return tB - tA;
+  });
+
+  const avaliacaoPorMontador = new Map<string, { soma: number, total: number }>();
+  avaliacoesSnapshot.docs.forEach(doc => {
+    const data = doc.data();
+    if (!data.montadorId) return;
+    const stats = avaliacaoPorMontador.get(data.montadorId) || { soma: 0, total: 0 };
+    stats.soma += data.estrelas;
+    stats.total += 1;
+    avaliacaoPorMontador.set(data.montadorId, stats);
+  });
+
+  const contagemMontagens = new Map<string, number>();
+  montagensSnapshot.docs.forEach(doc => {
+    const data = doc.data();
+    if (!data.montadorId) return;
+    const count = contagemMontagens.get(data.montadorId) || 0;
+    contagemMontagens.set(data.montadorId, count + 1);
+  });
+
+  const montadores = rawMontadores.map(m => ({
+    ...m,
+    _count: { montagens: contagemMontagens.get(m.id) || 0 }
+  }));
 
   return (
     <div>
@@ -80,7 +99,9 @@ export default async function MontadoresPage({
       ) : (
         <div className="space-y-3">
           {montadores.map((m) => {
-            const avaliacao = avaliacaoPorMontador.get(m.id);
+            const stats = avaliacaoPorMontador.get(m.id);
+            const avaliacao = stats ? { media: stats.soma / stats.total, total: stats.total } : null;
+
             return (
               <Link key={m.id} href={`/admin/montadores/${m.id}`}>
                 <Card className="transition-shadow hover:shadow-md">

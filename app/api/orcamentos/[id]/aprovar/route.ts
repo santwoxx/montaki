@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 
 export async function POST(
   req: NextRequest,
@@ -13,26 +13,26 @@ export async function POST(
       return NextResponse.json({ error: "Ação inválida" }, { status: 400 });
     }
 
-    const orcamento = await prisma.orcamento.findUnique({
-      where: { id },
-    });
+    const orcamentoRef = adminDb.collection("orcamentos").doc(id);
+    const orcamentoDoc = await orcamentoRef.get();
 
-    if (!orcamento) {
+    if (!orcamentoDoc.exists) {
       return NextResponse.json({ error: "Orçamento não encontrado" }, { status: 404 });
     }
 
-    if (orcamento.status !== "PENDENTE") {
+    const orcamento = orcamentoDoc.data();
+
+    if (orcamento?.status !== "PENDENTE") {
       return NextResponse.json({ error: "O orçamento não está mais pendente." }, { status: 400 });
     }
 
-    const updated = await prisma.orcamento.update({
-      where: { id },
-      data: {
-        status: action === "APROVAR" ? "APROVADO" : "REJEITADO",
-      },
+    const newStatus = action === "APROVAR" ? "APROVADO" : "REJEITADO";
+
+    await orcamentoRef.update({
+      status: newStatus,
     });
 
-    return NextResponse.json({ orcamento: updated }, { status: 200 });
+    return NextResponse.json({ orcamento: { id, ...orcamento, status: newStatus } }, { status: 200 });
   } catch (error) {
     console.error("Erro ao atualizar orçamento:", error);
     return NextResponse.json(

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import {
   atualizarMontagemAction,
   alternarPagamentoLojaAction,
@@ -35,17 +35,59 @@ export default async function MontagemDetalhePage({
   const { id } = await params;
   const { erro, sucesso } = await searchParams;
 
-  const [montagem, lojas, montadores, comissoes] = await Promise.all([
-    prisma.montagem.findUnique({
-      where: { id },
-      include: { avaliacao: true, ocorrencias: { orderBy: { criadoEm: "desc" } }, montador: true },
-    }),
-    prisma.loja.findMany({ orderBy: { nome: "asc" } }),
-    prisma.user.findMany({ where: { role: "MONTADOR" }, orderBy: { nome: "asc" } }),
-    prisma.comissaoLoja.findMany(),
+  const [
+    montagemDoc,
+    avaliacoesSnapshot,
+    ocorrenciasSnapshot,
+    lojasSnapshot,
+    montadoresSnapshot,
+    comissoesSnapshot
+  ] = await Promise.all([
+    adminDb.collection("montagens").doc(id).get(),
+    adminDb.collection("avaliacoes").where("montagemId", "==", id).limit(1).get(),
+    adminDb.collection("ocorrencias").where("montagemId", "==", id).get(), // We sort in memory
+    adminDb.collection("lojas").orderBy("nome", "asc").get(),
+    adminDb.collection("users").where("role", "==", "MONTADOR").orderBy("nome", "asc").get(),
+    adminDb.collection("comissoesLoja").get(),
   ]);
 
-  if (!montagem) notFound();
+  if (!montagemDoc.exists) notFound();
+
+  const montagemBase = montagemDoc.data() as any;
+  
+  // Relations
+  let montador = null;
+  if (montagemBase.montadorId) {
+    const m = montadoresSnapshot.docs.find(doc => doc.id === montagemBase.montadorId);
+    if (m) montador = { id: m.id, ...m.data() };
+  }
+
+  const avaliacao = avaliacoesSnapshot.empty ? null : { 
+    id: avaliacoesSnapshot.docs[0].id, 
+    ...avaliacoesSnapshot.docs[0].data(),
+    criadoEm: avaliacoesSnapshot.docs[0].data().criadoEm?.toDate() 
+  };
+
+  const ocorrencias = ocorrenciasSnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...(doc.data() as any),
+    criadoEm: doc.data().criadoEm?.toDate()
+  })).sort((a, b) => b.criadoEm.getTime() - a.criadoEm.getTime());
+
+  const montagem = {
+    id,
+    ...montagemBase,
+    dataAgendada: montagemBase.dataAgendada?.toDate() || null,
+    avaliacaoSolicitadaEm: montagemBase.avaliacaoSolicitadaEm?.toDate() || null,
+    notificadoCentralSyncEm: montagemBase.notificadoCentralSyncEm?.toDate() || null,
+    montador,
+    avaliacao,
+    ocorrencias
+  };
+
+  const lojas = lojasSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+  const montadores = montadoresSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+  const comissoes = comissoesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
 
   return (
     <div>
@@ -58,8 +100,8 @@ export default async function MontagemDetalhePage({
         titulo={montagem.clienteNome}
         descricao={montagem.numeroPedido ? `Pedido nº ${montagem.numeroPedido}` : undefined}
         acoes={
-          <Badge className={STATUS_COLOR[montagem.status]}>
-            {STATUS_LABEL[montagem.status]}
+          <Badge className={STATUS_COLOR[montagem.status as keyof typeof STATUS_COLOR]}>
+            {STATUS_LABEL[montagem.status as keyof typeof STATUS_LABEL]}
           </Badge>
         }
       />
@@ -218,11 +260,11 @@ export default async function MontagemDetalhePage({
             Histórico de ocorrências
           </p>
           <div className="space-y-3">
-            {montagem.ocorrencias.map((o) => (
+            {montagem.ocorrencias.map((o: any) => (
               <div key={o.id} className="rounded-lg border border-slate-100 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <Badge className={OCORRENCIA_COLOR[o.tipo]}>
-                    {OCORRENCIA_LABEL[o.tipo]}
+                  <Badge className={OCORRENCIA_COLOR[o.tipo as keyof typeof OCORRENCIA_COLOR]}>
+                    {OCORRENCIA_LABEL[o.tipo as keyof typeof OCORRENCIA_LABEL]}
                   </Badge>
                   <span className="text-xs text-slate-400">
                     {formatarDataHora(o.criadoEm)}
@@ -261,7 +303,7 @@ export default async function MontagemDetalhePage({
             numeroPedido: montagem.numeroPedido ?? "",
             descricaoServico: montagem.descricaoServico,
             valorServico: String(montagem.valorServico),
-            valorAssistencia: String(montagem.valorAssistencia),
+            valorAssistencia: String(montagem.valorAssistencia || "0"),
             percentualMontador: String(montagem.percentualMontador),
             dataAgendada: paraInputDate(montagem.dataAgendada),
             observacoes: montagem.observacoes ?? "",

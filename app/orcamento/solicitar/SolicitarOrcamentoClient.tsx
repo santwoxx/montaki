@@ -120,7 +120,7 @@ export default function SolicitarOrcamentoClient() {
       } else {
         setErro(res.erro || "Erro ao processar orçamento.");
       }
-    } catch (err) {
+    } catch {
       setErro("Ocorreu um erro ao enviar seu orçamento. Tente novamente.");
     } finally {
       setEnviando(false);

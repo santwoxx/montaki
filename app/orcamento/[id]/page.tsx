@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { buscarOrcamento, listarLojas, listarMontagensDoOrcamento, porId } from "@/lib/db";
-import { formatarMoeda, formatarData } from "@/lib/format";
+import { formatarMoeda } from "@/lib/format";
 import OrcamentoActionsClient from "./OrcamentoActionsClient";
 import { Logo } from "@/components/Logo";
 

@@ -10,9 +10,3 @@ self.addEventListener("install", (event) => {
   self.skipWaiting();
 });
 
-self.addEventListener("fetch", (event) => {
-  // Passa direto para a rede (sem cache customizado por enquanto), mas
-  // precisa chamar respondWith: um handler vazio é tratado como no-op
-  // pelo navegador e adiciona overhead a cada navegação sem benefício.
-  event.respondWith(fetch(event.request));
-});

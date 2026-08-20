@@ -247,7 +247,7 @@ function paraAvaliacao({ id, dados: d }: Documento): Avaliacao {
 
 function paraOrcamento({ id, dados: d }: Documento): Orcamento {
   const itensBrutos = Array.isArray(d.itens) ? d.itens : [];
-  const itens = itensBrutos.map((item: any) => ({
+  const itens = itensBrutos.map((item: Record<string, unknown> | null | undefined) => ({
     servicoId: texto(item?.servicoId) || undefined,
     nome: texto(item?.nome) || "Item",
     quantidade: numero(item?.quantidade, 1),

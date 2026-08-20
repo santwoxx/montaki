@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { formatarMoeda, formatarData } from "@/lib/format";
-import { Badge, Card } from "@/components/ui";
+import { Card } from "@/components/ui";
 import { atualizarStatusOrcamentoAction } from "@/lib/actions/orcamentos";
 import type { Orcamento, StatusOrcamento } from "@/lib/tipos";
 
@@ -33,7 +33,7 @@ export default function AdminOrcamentosClient({
     setProcessandoId(id);
     try {
       await atualizarStatusOrcamentoAction(id, novoStatus);
-    } catch (err) {
+    } catch {
       alert("Erro ao atualizar status do orçamento.");
     } finally {
       setProcessandoId(null);

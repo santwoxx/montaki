@@ -2,9 +2,9 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
+import { adminDb } from "@/lib/firebase-admin";
 import { requireAdmin } from "@/lib/auth";
-import { normalizarCnpj, ehErroCnpjDuplicado } from "@/lib/cnpj";
+import { normalizarCnpj } from "@/lib/cnpj";
 
 export async function criarLojaAction(formData: FormData) {
   await requireAdmin();
@@ -19,16 +19,32 @@ export async function criarLojaAction(formData: FormData) {
   }
 
   try {
-    await prisma.loja.create({
-      data: { nome, telefone: telefone || null, endereco: endereco || null, cnpj },
-    });
-  } catch (error) {
-    if (ehErroCnpjDuplicado(error)) {
+    // Check for duplicate CNPJ
+    const lojasRef = adminDb.collection("lojas");
+    const snapshot = await lojasRef.where("cnpj", "==", cnpj).get();
+    
+    if (!snapshot.empty) {
       redirect(
         `/admin/lojas?erro=${encodeURIComponent("Já existe uma loja cadastrada com esse CNPJ.")}`
       );
     }
-    throw error;
+
+    await lojasRef.add({
+      nome,
+      telefone: telefone || null,
+      endereco: endereco || null,
+      cnpj,
+      ativo: true,
+      createdAt: new Date(),
+    });
+
+  } catch (error: any) {
+    console.error("Erro ao criar loja:", error);
+    // Only throw if it's not a redirect
+    if (error.message !== 'NEXT_REDIRECT') {
+      throw error;
+    }
+    throw error; // Re-throw redirect to be caught by Next.js
   }
 
   revalidatePath("/admin/lojas");
@@ -53,15 +69,29 @@ export async function atualizarLojaAction(id: string, formData: FormData) {
   }
 
   try {
-    await prisma.loja.update({
-      where: { id },
-      data: { nome, telefone: telefone || null, endereco: endereco || null, cnpj, ativo },
-    });
-  } catch (error) {
-    if (ehErroCnpjDuplicado(error)) {
+    const lojasRef = adminDb.collection("lojas");
+    const snapshot = await lojasRef.where("cnpj", "==", cnpj).get();
+    
+    // Check if duplicate CNPJ belongs to ANOTHER store
+    const isDuplicate = snapshot.docs.some(doc => doc.id !== id);
+    if (isDuplicate) {
       redirect(
         `/admin/lojas?erro=${encodeURIComponent("Já existe outra loja cadastrada com esse CNPJ.")}`
       );
+    }
+
+    await lojasRef.doc(id).update({
+      nome,
+      telefone: telefone || null,
+      endereco: endereco || null,
+      cnpj,
+      ativo,
+      updatedAt: new Date(),
+    });
+  } catch (error: any) {
+    console.error("Erro ao atualizar loja:", error);
+    if (error.message !== 'NEXT_REDIRECT') {
+      throw error;
     }
     throw error;
   }
@@ -74,15 +104,27 @@ export async function excluirLojaAction(id: string) {
   await requireAdmin();
 
   try {
-    await prisma.loja.delete({ where: { id } });
-  } catch (error) {
-    const codigo = (error as { code?: string })?.code;
-    if (codigo === "P2003" || codigo === "P2014") {
+    // In Firestore, there are no strict foreign key constraints like P2003,
+    // so we manually check if there are montagens for this store
+    const montagensSnapshot = await adminDb
+      .collection("montagens")
+      .where("lojaId", "==", id)
+      .limit(1)
+      .get();
+
+    if (!montagensSnapshot.empty) {
       redirect(
         `/admin/lojas?erro=${encodeURIComponent(
           "Essa loja já tem montagens registradas e não pode ser excluída. Desative-a em vez disso."
         )}`
       );
+    }
+
+    await adminDb.collection("lojas").doc(id).delete();
+  } catch (error: any) {
+    console.error("Erro ao excluir loja:", error);
+    if (error.message !== 'NEXT_REDIRECT') {
+      throw error;
     }
     throw error;
   }

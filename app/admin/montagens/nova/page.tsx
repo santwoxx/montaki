@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { listarComissoes, listarLojas, listarMontadores, listarNotasPendentes, porId } from "@/lib/db";
 import { criarMontagemAction } from "@/lib/actions/montagens";
 import { Alerta, Card, PageHeader } from "@/components/ui";
 import { NovaMontagemForm } from "@/components/NovaMontagemForm";
@@ -11,18 +11,17 @@ export default async function NovaMontagemPage({
 }) {
   const { erro } = await searchParams;
 
-  const [lojas, montadores, comissoes, notasPendentesBrutas] = await Promise.all([
-    prisma.loja.findMany({ where: { ativo: true }, orderBy: { nome: "asc" } }),
-    prisma.user.findMany({
-      where: { role: "MONTADOR", ativo: true },
-      orderBy: { nome: "asc" },
-    }),
-    prisma.comissaoLoja.findMany(),
-    prisma.notaPendente.findMany({
-      orderBy: { criadaEm: "asc" },
-      include: { montadorSugerido: { select: { nome: true } } },
-    }),
-  ]);
+  const [todasLojas, todosMontadores, comissoes, notasPendentesBrutas] =
+    await Promise.all([
+      listarLojas(),
+      listarMontadores(),
+      listarComissoes(),
+      listarNotasPendentes(),
+    ]);
+
+  const lojas = todasLojas.filter((l) => l.ativo);
+  const montadores = todosMontadores.filter((m) => m.ativo);
+  const montadoresPorId = porId(todosMontadores);
 
   const notasPendentes = notasPendentesBrutas.map((n) => ({
     id: n.id,
@@ -36,7 +35,9 @@ export default async function NovaMontagemPage({
     observacoes: n.observacoes,
     fotoReferenciaUrl: n.fotoReferenciaUrl,
     montadorSugeridoId: n.montadorSugeridoId,
-    montadorSugeridoNome: n.montadorSugerido?.nome ?? null,
+    montadorSugeridoNome: n.montadorSugeridoId
+      ? montadoresPorId.get(n.montadorSugeridoId)?.nome ?? null
+      : null,
     lojaNomeSugerida: n.lojaNomeSugerida,
     lojaCnpjSugerido: n.lojaCnpjSugerido,
   }));

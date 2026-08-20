@@ -2,9 +2,15 @@
 
 import { XMLParser } from "fast-xml-parser";
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
+import {
+  COLECOES,
+  atualizarDocumento,
+  buscarLojaPorCnpj,
+  criarDocumento,
+  listarLojas,
+} from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
-import { normalizarCnpj, ehErroCnpjDuplicado } from "@/lib/cnpj";
+import { normalizarCnpj } from "@/lib/cnpj";
 import { paraNumeroBr } from "@/lib/format";
 
 export type DadosImportados = {
@@ -503,11 +509,11 @@ export async function resolverOuCriarLojaAction(
   const cnpj = normalizarCnpj(cnpjSugerido);
 
   if (cnpj) {
-    const porCnpj = await prisma.loja.findUnique({ where: { cnpj } });
+    const porCnpj = await buscarLojaPorCnpj(cnpj);
     if (porCnpj) return { lojaId: porCnpj.id, nome: porCnpj.nome, criada: false };
   }
 
-  const todas = await prisma.loja.findMany({ select: { id: true, nome: true, cnpj: true } });
+  const todas = await listarLojas();
   const nomeNota = nome.toLowerCase();
   const porNome = todas.find((l) => {
     const nomeLoja = l.nome.toLowerCase();
@@ -518,21 +524,19 @@ export async function resolverOuCriarLojaAction(
     // Achou pelo nome mas essa loja ainda não tinha CNPJ salvo — completa,
     // assim a próxima importação já reconhece direto pelo CNPJ.
     if (cnpj && !porNome.cnpj) {
-      await prisma.loja.update({ where: { id: porNome.id }, data: { cnpj } }).catch(() => {});
+      await atualizarDocumento(COLECOES.lojas, porNome.id, { cnpj }).catch(() => {});
     }
     return { lojaId: porNome.id, nome: porNome.nome, criada: false };
   }
 
-  try {
-    const nova = await prisma.loja.create({ data: { nome, cnpj } });
-    revalidatePath("/admin/lojas");
-    return { lojaId: nova.id, nome: nova.nome, criada: true };
-  } catch (error) {
-    // Corrida rara: duas importações da mesma loja nova ao mesmo tempo.
-    if (cnpj && ehErroCnpjDuplicado(error)) {
-      const existente = await prisma.loja.findUnique({ where: { cnpj } });
-      if (existente) return { lojaId: existente.id, nome: existente.nome, criada: false };
-    }
-    throw error;
-  }
+  const lojaId = await criarDocumento(COLECOES.lojas, {
+    nome,
+    telefone: null,
+    endereco: null,
+    cnpj,
+    ativo: true,
+    createdAt: new Date(),
+  });
+  revalidatePath("/admin/lojas");
+  return { lojaId, nome, criada: true };
 }

@@ -11,9 +11,3 @@ export function normalizarCnpj(valor: string | null | undefined): string | null 
   const digitos = String(valor || "").replace(/\D/g, "");
   return digitos.length === 14 ? digitos : null;
 }
-
-export function ehErroCnpjDuplicado(error: unknown) {
-  const codigo = (error as { code?: string })?.code;
-  const alvo = (error as { meta?: { target?: string[] } })?.meta?.target;
-  return codigo === "P2002" && (alvo ?? []).includes("cnpj");
-}

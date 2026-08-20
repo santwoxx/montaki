@@ -1,10 +1,11 @@
+import Link from "next/link";
 import { tabelaPrecos, regrasComerciais } from "@/lib/tabelaPrecos";
 import { Card } from "@/components/ui";
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Tabela de Preços | MontaFácil",
-  description: "Tabela de preços sugeridos para montagem de móveis.",
+  title: "Tabela de Preços | Montaki",
+  description: "Tabela de preços sugeridos para montagem de móveis da Montaki.",
 };
 
 export default function TabelaPrecosPage() {
@@ -14,13 +15,24 @@ export default function TabelaPrecosPage() {
   return (
     <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-4xl space-y-8">
-        <div className="text-center">
-          <h1 className="text-3xl font-extrabold text-slate-900 sm:text-4xl">
-            Tabela de Preços
+        <div className="text-center space-y-3">
+          <span className="text-xs font-bold uppercase tracking-widest text-gold bg-navy px-3 py-1 rounded-full">
+            Montaki Serviços
+          </span>
+          <h1 className="text-3xl font-extrabold text-slate-900 sm:text-4xl font-display">
+            Tabela de Preços de Montagem
           </h1>
-          <p className="mt-3 text-xl text-slate-500">
-            Valores sugeridos para montagem de móveis
+          <p className="text-lg text-slate-600 max-w-xl mx-auto">
+            Valores oficiais de referência para montagem e serviços adicionais.
           </p>
+          <div className="pt-2">
+            <Link
+              href="/orcamento/solicitar"
+              className="inline-flex items-center gap-2 rounded-xl bg-gold px-6 py-3 font-bold text-navy shadow-lg hover:bg-gold-light transition-all font-display uppercase tracking-wide text-sm"
+            >
+              <span>🚀 Fazer Orçamento Online Agora</span>
+            </Link>
+          </div>
         </div>
 
         <div className="grid gap-8 md:grid-cols-3">

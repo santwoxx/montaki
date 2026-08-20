@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { COLECOES, atualizarDocumento, buscarOrcamento } from "@/lib/db";
 
+// Rota pública de propósito: quem aprova é o cliente final, pelo link do
+// orçamento, sem login. A proteção é o id do orçamento (sorteado, não
+// enumerável) somada à checagem de que ele ainda está pendente -- uma vez
+// respondido, não dá para mudar a resposta por aqui.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -13,9 +17,7 @@ export async function POST(
       return NextResponse.json({ error: "Ação inválida" }, { status: 400 });
     }
 
-    const orcamento = await prisma.orcamento.findUnique({
-      where: { id },
-    });
+    const orcamento = await buscarOrcamento(id);
 
     if (!orcamento) {
       return NextResponse.json({ error: "Orçamento não encontrado" }, { status: 404 });
@@ -25,14 +27,10 @@ export async function POST(
       return NextResponse.json({ error: "O orçamento não está mais pendente." }, { status: 400 });
     }
 
-    const updated = await prisma.orcamento.update({
-      where: { id },
-      data: {
-        status: action === "APROVAR" ? "APROVADO" : "REJEITADO",
-      },
-    });
+    const status = action === "APROVAR" ? "APROVADO" : "REJEITADO";
+    await atualizarDocumento(COLECOES.orcamentos, id, { status });
 
-    return NextResponse.json({ orcamento: updated }, { status: 200 });
+    return NextResponse.json({ orcamento: { ...orcamento, status } }, { status: 200 });
   } catch (error) {
     console.error("Erro ao atualizar orçamento:", error);
     return NextResponse.json(

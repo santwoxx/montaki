@@ -1,6 +1,14 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import {
+  buscarUsuario,
+  listarAvaliacoesDoMontador,
+  listarComissoesDoMontador,
+  listarLojas,
+  listarMontagensDoMontador,
+  porId,
+  resumirAvaliacoes,
+} from "@/lib/db";
 import {
   atualizarMontadorAction,
   salvarComissoesAction,
@@ -14,6 +22,7 @@ import {
   Field,
   Input,
   PageHeader,
+  Select,
   StatCard,
   Vazio,
 } from "@/components/ui";
@@ -33,49 +42,28 @@ export default async function MontadorDetalhePage({
   const { id } = await params;
   const { erro, sucesso } = await searchParams;
 
-  const [
-    montador,
-    lojas,
-    comissoes,
-    montagensRecentes,
-    ganhos,
-    totalMontagens,
-    avaliacaoAgg,
-    avaliacoesRecentes,
-  ] = await Promise.all([
-    prisma.user.findUnique({ where: { id, role: "MONTADOR" } }),
-    prisma.loja.findMany({ where: { ativo: true }, orderBy: { nome: "asc" } }),
-    prisma.comissaoLoja.findMany({ where: { montadorId: id } }),
-    prisma.montagem.findMany({
-      where: { montadorId: id },
-      orderBy: { createdAt: "desc" },
-      take: 8,
-      include: { loja: true },
-    }),
-    prisma.montagem.aggregate({
-      _sum: { valorMontador: true },
-      where: { montadorId: id, status: "CONCLUIDO", pagoAoMontador: false },
-    }),
-    prisma.montagem.count({ where: { montadorId: id } }),
-    prisma.avaliacao.aggregate({
-      _avg: { estrelas: true },
-      _count: { _all: true },
-      where: { montadorId: id },
-    }),
-    prisma.avaliacao.findMany({
-      where: { montadorId: id },
-      orderBy: { criadoEm: "desc" },
-      take: 10,
-      include: { montagem: { select: { clienteNome: true } } },
-    }),
+  const [montador, lojas, comissoes, montagens, avaliacoes] = await Promise.all([
+    buscarUsuario(id),
+    listarLojas(),
+    listarComissoesDoMontador(id),
+    listarMontagensDoMontador(id),
+    listarAvaliacoesDoMontador(id),
   ]);
 
-  if (!montador) notFound();
+  if (!montador || montador.role !== "MONTADOR") notFound();
 
-  const mediaAvaliacao = avaliacaoAgg._avg.estrelas ?? 0;
-  const totalAvaliacoes = avaliacaoAgg._count._all;
+  const { media: mediaAvaliacao, total: totalAvaliacoes } = resumirAvaliacoes(avaliacoes);
+  const avaliacoesRecentes = avaliacoes.slice(0, 10);
+
+  const lojasPorId = porId(lojas);
+  const montagensRecentes = montagens.slice(0, 8);
+  const totalMontagens = montagens.length;
+  const ganhosPendentes = montagens
+    .filter((m) => m.status === "CONCLUIDO" && !m.pagoAoMontador)
+    .reduce((soma, m) => soma + m.valorMontador, 0);
 
   const comissaoPorLoja = new Map(comissoes.map((c) => [c.lojaId, c.percentual]));
+  const clientePorMontagem = new Map(montagens.map((m) => [m.id, m.clienteNome]));
 
   return (
     <div>
@@ -116,7 +104,7 @@ export default async function MontadorDetalhePage({
       <div className="mb-8 grid gap-4 sm:grid-cols-2">
         <StatCard
           titulo="Comissão pendente de pagamento"
-          valor={formatarMoeda(ganhos._sum.valorMontador)}
+          valor={formatarMoeda(ganhosPendentes)}
           cor="text-amber-600"
           sub="Referente a montagens já concluídas"
         />
@@ -150,7 +138,7 @@ export default async function MontadorDetalhePage({
                   <div className="flex items-center gap-2">
                     <Estrelas valor={a.estrelas} tamanho="text-sm" />
                     <span className="text-sm font-medium text-slate-700">
-                      {a.montagem.clienteNome}
+                      {clientePorMontagem.get(a.montagemId) ?? "Cliente"}
                     </span>
                   </div>
                   <span className="text-xs text-slate-400">{formatarData(a.criadoEm)}</span>
@@ -167,7 +155,7 @@ export default async function MontadorDetalhePage({
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <h2 className="mb-4 text-base font-semibold text-slate-900">
-            Dados do montador
+            Dados do cadastro
           </h2>
           <form
             action={atualizarMontadorAction.bind(null, montador.id)}
@@ -181,6 +169,15 @@ export default async function MontadorDetalhePage({
             </Field>
             <Field label="E-mail de acesso">
               <Input type="email" name="email" defaultValue={montador.email} required />
+            </Field>
+            <Field
+              label="Vínculo"
+              hint="Só organiza a equipe — não muda o que a pessoa enxerga no sistema."
+            >
+              <Select name="vinculo" defaultValue={montador.vinculo ?? "FUNCIONARIO"}>
+                <option value="FUNCIONARIO">Funcionário</option>
+                <option value="COLABORADOR">Colaborador</option>
+              </Select>
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field
@@ -203,7 +200,7 @@ export default async function MontadorDetalhePage({
                 defaultChecked={montador.ativo}
                 className="h-4 w-4 rounded border-slate-300"
               />
-              Montador ativo (pode fazer login e receber montagens)
+              Acesso ativo (pode fazer login e receber montagens)
             </label>
             <SubmitButton pendingText="Salvando…">Salvar dados</SubmitButton>
           </form>
@@ -264,7 +261,8 @@ export default async function MontadorDetalhePage({
                     <div>
                       <p className="font-semibold text-slate-900">{m.clienteNome}</p>
                       <p className="text-sm text-slate-500">
-                        {m.loja.nome} · {formatarMoeda(m.valorMontador)} de comissão
+                        {lojasPorId.get(m.lojaId)?.nome ?? "Loja removida"} ·{" "}
+                        {formatarMoeda(m.valorMontador)} de comissão
                       </p>
                       <p className="text-xs text-slate-400">{formatarData(m.createdAt)}</p>
                     </div>

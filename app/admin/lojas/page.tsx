@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { listarLojas, listarMontagens } from "@/lib/db";
 import { criarLojaAction, atualizarLojaAction, excluirLojaAction } from "@/lib/actions/lojas";
 import { Alerta, Badge, Button, Card, Field, Input, PageHeader, Vazio } from "@/components/ui";
 import { FormConfirmar } from "@/components/FormConfirmar";
@@ -12,10 +12,25 @@ export default async function LojasPage({
 }) {
   const { erro, sucesso } = await searchParams;
 
-  const lojas = await prisma.loja.findMany({
-    orderBy: { nome: "asc" },
-    include: { _count: { select: { montagens: true } } },
-  });
+  const [lojasCadastradas, montagens] = await Promise.all([
+    listarLojas(),
+    listarMontagens(),
+  ]);
+
+  // Quantas montagens cada loja tem -- o `_count` do Prisma. Decide se a
+  // loja pode ser excluída ou se só dá para desativar.
+  const montagensPorLoja = new Map<string, number>();
+  for (const montagem of montagens) {
+    montagensPorLoja.set(
+      montagem.lojaId,
+      (montagensPorLoja.get(montagem.lojaId) ?? 0) + 1
+    );
+  }
+
+  const lojas = lojasCadastradas.map((loja) => ({
+    ...loja,
+    _count: { montagens: montagensPorLoja.get(loja.id) ?? 0 },
+  }));
 
   return (
     <div>

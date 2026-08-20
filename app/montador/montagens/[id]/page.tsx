@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { requireMontador } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import {
+  buscarAvaliacaoDaMontagem,
+  buscarLoja,
+  buscarMontagem,
+  listarOcorrenciasDaMontagem,
+} from "@/lib/db";
 import {
   atualizarClienteMontadorAction,
   atualizarStatusAction,
@@ -42,13 +47,18 @@ export default async function MontagemDetalheMontadorPage({
   const { id } = await params;
   const { erro, sucesso } = await searchParams;
 
-  const montagem = await prisma.montagem.findUnique({
-    where: { id },
-    include: { loja: true, avaliacao: true, ocorrencias: { orderBy: { criadoEm: "desc" } } },
-  });
+  const montagem = await buscarMontagem(id);
 
   if (!montagem) notFound();
+  // A checagem de dono vem antes de qualquer outra leitura: nada da
+  // montagem de outra pessoa deve ser buscado, nem para descartar depois.
   if (montagem.montadorId !== session.sub) redirect("/montador");
+
+  const [loja, ocorrencias, avaliacao] = await Promise.all([
+    buscarLoja(montagem.lojaId),
+    listarOcorrenciasDaMontagem(id),
+    buscarAvaliacaoDaMontagem(id),
+  ]);
 
   return (
     <div>
@@ -60,7 +70,7 @@ export default async function MontagemDetalheMontadorPage({
 
       <PageHeader
         titulo={montagem.clienteNome}
-        descricao={montagem.loja.nome}
+        descricao={loja?.nome ?? "Loja removida"}
         acoes={
           <Badge className={STATUS_COLOR[montagem.status]}>
             {STATUS_LABEL[montagem.status]}
@@ -227,13 +237,13 @@ export default async function MontagemDetalheMontadorPage({
           </Card>
         ) : null}
 
-        {montagem.ocorrencias.length > 0 ? (
+        {ocorrencias.length > 0 ? (
           <Card>
             <p className="mb-3 text-sm font-medium text-slate-500">
               Histórico de ocorrências
             </p>
             <div className="space-y-3">
-              {montagem.ocorrencias.map((o) => (
+              {ocorrencias.map((o) => (
                 <div key={o.id} className="rounded-lg border border-slate-100 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Badge className={OCORRENCIA_COLOR[o.tipo]}>
@@ -307,17 +317,17 @@ export default async function MontagemDetalheMontadorPage({
               <p className="mb-1 text-base font-semibold text-slate-900">
                 Avaliação do cliente
               </p>
-              {montagem.avaliacao ? (
+              {avaliacao ? (
                 <div>
                   <div className="mt-2 flex items-center gap-2">
-                    <Estrelas valor={montagem.avaliacao.estrelas} tamanho="text-2xl" />
+                    <Estrelas valor={avaliacao.estrelas} tamanho="text-2xl" />
                     <span className="text-sm text-slate-500">
-                      {montagem.avaliacao.estrelas} de 5
+                      {avaliacao.estrelas} de 5
                     </span>
                   </div>
-                  {montagem.avaliacao.comentario ? (
+                  {avaliacao.comentario ? (
                     <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
-                      &ldquo;{montagem.avaliacao.comentario}&rdquo;
+                      &ldquo;{avaliacao.comentario}&rdquo;
                     </p>
                   ) : null}
                 </div>

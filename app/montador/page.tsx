@@ -1,6 +1,13 @@
 import Link from "next/link";
 import { requireMontador } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import {
+  listarAvaliacoesDoMontador,
+  listarLojas,
+  listarMontagensDoMontador,
+  ordenarPor,
+  porId,
+  resumirAvaliacoes,
+} from "@/lib/db";
 import { Badge, Card, PageHeader, StatCard, Vazio } from "@/components/ui";
 import { Estrelas } from "@/components/Estrelas";
 import { formatarData, formatarMoeda, STATUS_COLOR, STATUS_LABEL } from "@/lib/format";
@@ -12,56 +19,44 @@ export default async function PainelMontadorPage() {
   inicioMes.setDate(1);
   inicioMes.setHours(0, 0, 0, 0);
 
-  const [
-    ativas,
-    concluidasRecentes,
-    valorPendenteAgg,
-    aReceberAgg,
-    faturamentoMesAgg,
-    avaliacaoAgg,
-    avaliacoesRecentes,
-  ] = await Promise.all([
-    prisma.montagem.findMany({
-      where: { montadorId: session.sub, status: { in: ["PENDENTE", "EM_ANDAMENTO"] } },
-      orderBy: [{ dataAgendada: "asc" }, { createdAt: "asc" }],
-      include: { loja: true },
-    }),
-    prisma.montagem.findMany({
-      where: { montadorId: session.sub, status: "CONCLUIDO" },
-      orderBy: { concluidoEm: "desc" },
-      take: 5,
-      include: { loja: true },
-    }),
-    prisma.montagem.aggregate({
-      _sum: { valorMontador: true },
-      where: { montadorId: session.sub, status: { in: ["PENDENTE", "EM_ANDAMENTO"] } },
-    }),
-    prisma.montagem.aggregate({
-      _sum: { valorMontador: true },
-      where: { montadorId: session.sub, createdAt: { gte: inicioMes }, status: { not: "CANCELADO" } },
-    }),
-    // Espelha o "Faturamento do mês" do painel do admin: valor BRUTO
-    // (valorServico) das montagens designadas ao montador no mês, não o
-    // ganho dele (isso é o card "A receber", que aplica a % da comissão).
-    prisma.montagem.aggregate({
-      _sum: { valorServico: true },
-      where: { montadorId: session.sub, createdAt: { gte: inicioMes }, status: { not: "CANCELADO" } },
-    }),
-    prisma.avaliacao.aggregate({
-      _avg: { estrelas: true },
-      _count: { _all: true },
-      where: { montadorId: session.sub },
-    }),
-    prisma.avaliacao.findMany({
-      where: { montadorId: session.sub },
-      orderBy: { criadoEm: "desc" },
-      take: 3,
-      include: { montagem: { select: { clienteNome: true } } },
-    }),
+  const [montagens, lojas, avaliacoes] = await Promise.all([
+    listarMontagensDoMontador(session.sub),
+    listarLojas(),
+    listarAvaliacoesDoMontador(session.sub),
   ]);
 
-  const mediaAvaliacao = avaliacaoAgg._avg.estrelas ?? 0;
-  const totalAvaliacoes = avaliacaoAgg._count._all;
+  const lojasPorId = porId(lojas);
+  const comLoja = <T extends { lojaId: string }>(montagem: T) => ({
+    ...montagem,
+    loja: lojasPorId.get(montagem.lojaId) ?? null,
+  });
+
+  const ativas = ordenarPor(
+    montagens.filter((m) => m.status === "PENDENTE" || m.status === "EM_ANDAMENTO"),
+    ["dataAgendada", "asc"],
+    ["createdAt", "asc"]
+  ).map(comLoja);
+
+  const concluidas = montagens.filter((m) => m.status === "CONCLUIDO");
+  const concluidasRecentes = ordenarPor(concluidas, ["concluidoEm", "desc"])
+    .slice(0, 5)
+    .map(comLoja);
+
+  const valorPendente = ativas.reduce((soma, m) => soma + m.valorMontador, 0);
+
+  const doMes = montagens.filter(
+    (m) => m.status !== "CANCELADO" && m.createdAt >= inicioMes
+  );
+  const aReceber = doMes.reduce((soma, m) => soma + m.valorMontador, 0);
+  // Espelha o "Faturamento do mês" do painel do admin: valor BRUTO
+  // (valorServico) das montagens designadas ao montador no mês, não o
+  // ganho dele (isso é o card "A receber", que aplica a % da comissão).
+  const faturamentoMes = doMes.reduce((soma, m) => soma + m.valorServico, 0);
+
+  const clientePorMontagem = new Map(montagens.map((m) => [m.id, m.clienteNome]));
+  const avaliacoesRecentes = avaliacoes.slice(0, 3);
+
+  const { media: mediaAvaliacao, total: totalAvaliacoes } = resumirAvaliacoes(avaliacoes);
 
   return (
     <div>
@@ -71,21 +66,21 @@ export default async function PainelMontadorPage() {
         <StatCard titulo="Montagens pendentes" valor={String(ativas.length)} cor="text-amber-600" icone="⏳" />
         <StatCard
           titulo="Valor pendente"
-          valor={formatarMoeda(valorPendenteAgg._sum.valorMontador)}
+          valor={formatarMoeda(valorPendente)}
           sub="Montagens ainda não concluídas"
           cor="text-amber-600"
           icone="🧾"
         />
         <StatCard
           titulo="A receber"
-          valor={formatarMoeda(aReceberAgg._sum.valorMontador)}
+          valor={formatarMoeda(aReceber)}
           sub="Sua parte sobre as montagens do mês"
           cor="text-emerald-600"
           icone="💰"
         />
         <StatCard
           titulo="Faturamento do mês"
-          valor={formatarMoeda(faturamentoMesAgg._sum.valorServico)}
+          valor={formatarMoeda(faturamentoMes)}
           sub="Valor total das montagens do mês"
           cor="text-blue-600"
           icone="📈"
@@ -117,7 +112,7 @@ export default async function PainelMontadorPage() {
                     <p key={a.id} className="text-sm text-slate-600">
                       &ldquo;{a.comentario}&rdquo;{" "}
                       <span className="text-xs text-slate-400">
-                        — {a.montagem.clienteNome}
+                        — {clientePorMontagem.get(a.montagemId) ?? "Cliente"}
                       </span>
                     </p>
                   ))}
@@ -138,7 +133,9 @@ export default async function PainelMontadorPage() {
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <p className="font-semibold text-slate-900">{m.clienteNome}</p>
-                    <p className="text-sm text-slate-500">{m.loja.nome}</p>
+                    <p className="text-sm text-slate-500">
+                      {m.loja?.nome ?? "Loja removida"}
+                    </p>
                     <p className="mt-1 text-xs text-slate-400">
                       {m.dataAgendada ? formatarData(m.dataAgendada) : "Sem data definida"}
                     </p>
@@ -170,7 +167,9 @@ export default async function PainelMontadorPage() {
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <p className="font-semibold text-slate-900">{m.clienteNome}</p>
-                    <p className="text-sm text-slate-500">{m.loja.nome}</p>
+                    <p className="text-sm text-slate-500">
+                      {m.loja?.nome ?? "Loja removida"}
+                    </p>
                     <p className="mt-1 text-xs text-slate-400">
                       Concluída em {formatarData(m.concluidoEm)}
                     </p>

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Orbitron, Raleway } from "next/font/google";
+import { Analytics } from "@/components/Analytics";
 import "./globals.css";
 
 const orbitron = Orbitron({
@@ -38,6 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body className="min-h-full flex flex-col">
         {children}
+        <Analytics />
         <script
           dangerouslySetInnerHTML={{
             __html: `

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { prisma } from "@/lib/prisma";
+import { buscarAvaliacaoDaMontagem, buscarMontagem, buscarUsuario } from "@/lib/db";
 import { enviarAvaliacaoAction } from "@/lib/actions/avaliacoes";
 import { AvaliarForm } from "@/components/AvaliarForm";
 import { Estrelas } from "@/components/Estrelas";
@@ -44,10 +44,7 @@ export default async function AvaliarPage({
   const { id } = await params;
   const { erro } = await searchParams;
 
-  const montagem = await prisma.montagem.findUnique({
-    where: { id },
-    include: { montador: true, avaliacao: true },
-  });
+  const montagem = await buscarMontagem(id);
 
   if (!montagem || !montagem.montadorId || montagem.status !== "CONCLUIDO") {
     return (
@@ -62,7 +59,12 @@ export default async function AvaliarPage({
     );
   }
 
-  if (montagem.avaliacao) {
+  const [avaliacao, montador] = await Promise.all([
+    buscarAvaliacaoDaMontagem(id),
+    buscarUsuario(montagem.montadorId),
+  ]);
+
+  if (avaliacao) {
     return (
       <LayoutAvaliacao>
         <Card className="text-center">
@@ -70,15 +72,15 @@ export default async function AvaliarPage({
             Obrigado pela sua avaliação!
           </p>
           <div className="mb-2 flex justify-center">
-            <Estrelas valor={montagem.avaliacao.estrelas} tamanho="text-3xl" />
+            <Estrelas valor={avaliacao.estrelas} tamanho="text-3xl" />
           </div>
-          {montagem.avaliacao.comentario ? (
+          {avaliacao.comentario ? (
             <p className="mt-3 text-sm text-slate-600">
-              &ldquo;{montagem.avaliacao.comentario}&rdquo;
+              &ldquo;{avaliacao.comentario}&rdquo;
             </p>
           ) : null}
           <p className="mt-4 text-xs text-slate-400">
-            Avaliado em {formatarData(montagem.avaliacao.criadoEm)}
+            Avaliado em {formatarData(avaliacao.criadoEm)}
           </p>
         </Card>
       </LayoutAvaliacao>
@@ -93,12 +95,12 @@ export default async function AvaliarPage({
         </p>
         <p className="mb-5 text-center text-sm text-slate-500">
           Sua opinião ajuda a avaliar o trabalho de{" "}
-          {montagem.montador?.nome.split(" ")[0]}.
+          {montador?.nome.split(" ")[0] ?? "quem te atendeu"}.
         </p>
         {erro ? <Alerta tipo="erro">{erro}</Alerta> : null}
         <AvaliarForm
           action={enviarAvaliacaoAction.bind(null, montagem.id)}
-          nomeMontador={montagem.montador?.nome.split(" ")[0] ?? "quem te atendeu"}
+          nomeMontador={montador?.nome.split(" ")[0] ?? "quem te atendeu"}
         />
       </Card>
     </LayoutAvaliacao>

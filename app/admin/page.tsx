@@ -1,5 +1,13 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import {
+  listarLojas,
+  listarMontagens,
+  listarNotasPendentes,
+  listarUsuarios,
+  ordenarPor,
+  porId,
+} from "@/lib/db";
+import { pareceIdDeIntegracaoExterna } from "@/lib/integracaoExterna";
 import { formatarData, formatarMoeda, STATUS_COLOR, STATUS_LABEL } from "@/lib/format";
 import { Badge, Card, LinkButton, PageHeader, StatCard, Vazio } from "@/components/ui";
 import { GraficoFaturamento, type PontoFaturamento } from "@/components/GraficoFaturamento";
@@ -14,59 +22,73 @@ export default async function AdminDashboardPage() {
   const inicioJanela = new Date(inicioMes);
   inicioJanela.setMonth(inicioJanela.getMonth() - (MESES_PARA_GRAFICO - 1));
 
-  const [
-    pendentes,
-    emAndamento,
-    naoAtribuidas,
-    aPagarAgg,
-    faturamentoMesAgg,
-    concluidasMes,
-    montadoresAtivos,
-    proximas,
-    notasPendentesCount,
-    aguardandoConfirmacaoIntegracaoExterna,
-    montagensParaGrafico,
-  ] = await Promise.all([
-    prisma.montagem.count({ where: { status: "PENDENTE" } }),
-    prisma.montagem.count({ where: { status: "EM_ANDAMENTO" } }),
-    prisma.montagem.count({
-      where: { montadorId: null, status: { not: "CANCELADO" } },
-    }),
-    prisma.montagem.aggregate({
-      _sum: { valorMontador: true },
-      where: { pagoAoMontador: false, status: "CONCLUIDO" },
-    }),
-    prisma.montagem.aggregate({
-      _sum: { valorServico: true, valorAssistencia: true },
-      where: { createdAt: { gte: inicioMes }, status: { not: "CANCELADO" } },
-    }),
-    prisma.montagem.count({
-      where: { status: "CONCLUIDO", concluidoEm: { gte: inicioMes } },
-    }),
-    prisma.user.count({ where: { role: "MONTADOR", ativo: true } }),
-    prisma.montagem.findMany({
-      where: {
-        status: { in: ["PENDENTE", "EM_ANDAMENTO"] },
-      },
-      orderBy: [{ dataAgendada: "asc" }, { createdAt: "desc" }],
-      take: 6,
-      include: { loja: true, montador: true },
-    }),
-    prisma.notaPendente.count(),
-    prisma.montagem.findMany({
-      where: {
-        status: "CONCLUIDO",
-        numeroPedido: { startsWith: "del-" },
-        notificadoCentralSyncEm: null,
-      },
-      select: { id: true, clienteNome: true, montador: { select: { nome: true } } },
-      take: 5,
-    }),
-    prisma.montagem.findMany({
-      where: { status: { not: "CANCELADO" }, createdAt: { gte: inicioJanela } },
-      select: { createdAt: true, valorServico: true },
-    }),
+  // Uma leitura de cada coleção por requisição (memoizada em lib/db.ts) e
+  // todos os números derivados aqui: no Firestore, cada consulta separada
+  // seria uma volta a mais na rede para responder o mesmo painel.
+  const [montagens, usuarios, lojas, notasPendentes] = await Promise.all([
+    listarMontagens(),
+    listarUsuarios(),
+    listarLojas(),
+    listarNotasPendentes(),
   ]);
+
+  const lojasPorId = porId(lojas);
+  const usuariosPorId = porId(usuarios);
+  const naoCanceladas = montagens.filter((m) => m.status !== "CANCELADO");
+
+  const pendentes = montagens.filter((m) => m.status === "PENDENTE").length;
+  const emAndamento = montagens.filter((m) => m.status === "EM_ANDAMENTO").length;
+  const naoAtribuidas = naoCanceladas.filter((m) => !m.montadorId).length;
+
+  const aPagarAosMontadores = montagens
+    .filter((m) => m.status === "CONCLUIDO" && !m.pagoAoMontador)
+    .reduce((soma, m) => soma + m.valorMontador, 0);
+
+  const doMes = naoCanceladas.filter((m) => m.createdAt >= inicioMes);
+  const faturamentoMes = {
+    servico: doMes.reduce((soma, m) => soma + m.valorServico, 0),
+    assistencia: doMes.reduce((soma, m) => soma + m.valorAssistencia, 0),
+  };
+
+  const concluidasMes = montagens.filter(
+    (m) => m.status === "CONCLUIDO" && m.concluidoEm && m.concluidoEm >= inicioMes
+  ).length;
+
+  const montadoresAtivos = usuarios.filter(
+    (u) => u.role === "MONTADOR" && u.ativo
+  ).length;
+
+  const proximas = ordenarPor(
+    montagens.filter((m) => m.status === "PENDENTE" || m.status === "EM_ANDAMENTO"),
+    ["dataAgendada", "asc"],
+    ["createdAt", "desc"]
+  )
+    .slice(0, 6)
+    .map((m) => ({
+      ...m,
+      loja: lojasPorId.get(m.lojaId) ?? null,
+      montador: m.montadorId ? usuariosPorId.get(m.montadorId) ?? null : null,
+    }));
+
+  const notasPendentesCount = notasPendentes.length;
+
+  const aguardandoConfirmacaoIntegracaoExterna = montagens
+    .filter(
+      (m) =>
+        m.status === "CONCLUIDO" &&
+        pareceIdDeIntegracaoExterna(m.numeroPedido) &&
+        !m.notificadoCentralSyncEm
+    )
+    .slice(0, 5)
+    .map((m) => ({
+      id: m.id,
+      clienteNome: m.clienteNome,
+      montador: m.montadorId ? usuariosPorId.get(m.montadorId) ?? null : null,
+    }));
+
+  const montagensParaGrafico = naoCanceladas.filter(
+    (m) => m.createdAt >= inicioJanela
+  );
 
   const dadosFaturamento: PontoFaturamento[] = Array.from({ length: MESES_PARA_GRAFICO }, (_, i) => {
     const data = new Date(inicioMes);
@@ -144,18 +166,18 @@ export default async function AdminDashboardPage() {
         />
         <StatCard
           titulo="A receber das lojas"
-          valor={formatarMoeda(((faturamentoMesAgg._sum.valorServico || 0) * 0.08) + (faturamentoMesAgg._sum.valorAssistencia || 0))}
+          valor={formatarMoeda(faturamentoMes.servico * 0.08 + faturamentoMes.assistencia)}
           sub="8% sobre o faturamento do mês + Assistências"
           icone="🏬"
         />
         <StatCard
           titulo="A pagar aos montadores"
-          valor={formatarMoeda(aPagarAgg._sum.valorMontador)}
+          valor={formatarMoeda(aPagarAosMontadores)}
           icone="👷"
         />
         <StatCard
           titulo="Faturamento do mês"
-          valor={formatarMoeda(faturamentoMesAgg._sum.valorServico)}
+          valor={formatarMoeda(faturamentoMes.servico)}
           sub={`${concluidasMes} concluída(s) no mês · ${montadoresAtivos} montador(es) ativo(s)`}
           cor="text-emerald-600"
           icone="📈"
@@ -185,7 +207,8 @@ export default async function AdminDashboardPage() {
                     <div>
                       <p className="font-semibold text-slate-900">{m.clienteNome}</p>
                       <p className="text-sm text-slate-500">
-                        {m.loja.nome} · {m.montador ? m.montador.nome : "Sem montador"}
+                        {m.loja?.nome ?? "Loja removida"} ·{" "}
+                        {m.montador ? m.montador.nome : "Sem montador"}
                       </p>
                       <p className="mt-1 text-xs text-slate-400">
                         {m.dataAgendada ? `Agendado para ${formatarData(m.dataAgendada)}` : "Sem data definida"}

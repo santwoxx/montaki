@@ -1,4 +1,4 @@
-export type CategoriaServico = "Principal" | "Adicional" | "Regra";
+export type CategoriaServico = "Principal" | "Adicional";
 
 export interface ItemTabelaPreco {
   id: string;
@@ -20,22 +20,21 @@ export const tabelaPrecos: ItemTabelaPreco[] = [
   { id: "s7", nome: "Multiuso grande", precoBase: 99, precoFormatado: "R$ 99,00", categoria: "Principal" },
   { id: "s8", nome: "Cama solteiro", precoBase: 88, precoFormatado: "R$ 88,00", categoria: "Principal" },
   { id: "s9", nome: "Cama casal", precoBase: 110, precoFormatado: "R$ 110,00", categoria: "Principal" },
-  // Cama box e Cama box baú omitidos a pedido do usuário
-  { id: "s10", nome: "Beliche", precoBase: 143, precoFormatado: "R$ 143,00", categoria: "Principal" },
-  { id: "s11", nome: "Guarda-roupa 2 portas", precoBase: 110, precoFormatado: "R$ 110,00", categoria: "Principal" },
-  { id: "s12", nome: "Guarda-roupa 3 portas", precoBase: 143, precoFormatado: "R$ 143,00", categoria: "Principal" },
-  { id: "s13", nome: "Guarda-roupa 4 portas", precoBase: 176, precoFormatado: "R$ 176,00", categoria: "Principal" },
-  { id: "s14", nome: "Guarda-roupa 6 portas", precoBase: 220, precoFormatado: "R$ 220,00", categoria: "Principal" },
-  { id: "s15", nome: "Guarda-roupa casal grande", precoBase: 242, precoFormatado: "R$ 242,00", categoria: "Principal" },
-  { id: "s16", nome: "Painel de TV", precoBase: 110, precoFormatado: "R$ 110,00", categoria: "Principal" },
-  { id: "s17", nome: "Painel + instalação na parede", precoBase: 165, precoFormatado: "R$ 165,00", categoria: "Principal" },
-  { id: "s18", nome: "Mesa + 4 cadeiras", precoBase: 132, precoFormatado: "R$ 132,00", categoria: "Principal" },
-  { id: "s19", nome: "Mesa + 6 cadeiras", precoBase: 165, precoFormatado: "R$ 165,00", categoria: "Principal" },
-  { id: "s20", nome: "Armário de cozinha pequeno", precoBase: 110, precoFormatado: "R$ 110,00", categoria: "Principal" },
-  { id: "s21", nome: "Armário de cozinha completo", precoBase: 275, precoFormatado: "R$ 275,00+", categoria: "Principal", observacao: "A partir de R$ 275,00" },
-  { id: "s22", nome: "Cristaleira / torre", precoBase: 132, precoFormatado: "R$ 132,00", categoria: "Principal" },
-  { id: "s23", nome: "Balcão / aparador", precoBase: 88, precoFormatado: "R$ 88,00", categoria: "Principal" },
-
+  { id: "s10", nome: "Cama box", precoBase: 77, precoFormatado: "R$ 77,00", categoria: "Principal" },
+  { id: "s11", nome: "Cama box baú", precoBase: 132, precoFormatado: "R$ 132,00", categoria: "Principal" },
+  { id: "s12", nome: "Beliche", precoBase: 143, precoFormatado: "R$ 143,00", categoria: "Principal" },
+  { id: "s13", nome: "Guarda-roupa 2 portas", precoBase: 110, precoFormatado: "R$ 110,00", categoria: "Principal" },
+  { id: "s14", nome: "Guarda-roupa 3 portas", precoBase: 143, precoFormatado: "R$ 143,00", categoria: "Principal" },
+  { id: "s15", nome: "Guarda-roupa 4 portas", precoBase: 176, precoFormatado: "R$ 176,00", categoria: "Principal" },
+  { id: "s16", nome: "Guarda-roupa 6 portas", precoBase: 220, precoFormatado: "R$ 220,00", categoria: "Principal" },
+  { id: "s17", nome: "Guarda-roupa casal grande", precoBase: 242, precoFormatado: "R$ 242,00", categoria: "Principal" },
+  { id: "s18", nome: "Painel de TV", precoBase: 110, precoFormatado: "R$ 110,00", categoria: "Principal" },
+  { id: "s19", nome: "Painel + instalação na parede", precoBase: 165, precoFormatado: "R$ 165,00", categoria: "Principal" },
+  { id: "s20", nome: "Mesa + 4 cadeiras", precoBase: 132, precoFormatado: "R$ 132,00", categoria: "Principal" },
+  { id: "s21", nome: "Mesa + 6 cadeiras", precoBase: 165, precoFormatado: "R$ 165,00", categoria: "Principal" },
+  { id: "s22", nome: "Armário de cozinha pequeno", precoBase: 110, precoFormatado: "R$ 110,00", categoria: "Principal" },
+  { id: "s23", nome: "Armário de cozinha completo", precoBase: 275, precoFormatado: "R$ 275,00+", categoria: "Principal", observacao: "A partir de R$ 275,00" },
+  { id: "s24", nome: "Cristaleira / torre", precoBase: 132, precoFormatado: "R$ 132,00", categoria: "Principal" },
   // SERVIÇOS ADICIONAIS
   { id: "a1", nome: "Desmontagem de móvel", precoBase: null, precoFormatado: "50% do valor da montagem", categoria: "Adicional" },
   { id: "a2", nome: "Remontagem em outro endereço", precoBase: null, precoFormatado: "Orçamento", categoria: "Adicional" },
@@ -59,3 +58,4 @@ export const regrasComerciais = [
   "Desmontagem e remontagem são cobradas separadamente.",
   "Instalações elétricas, hidráulicas ou alterações estruturais não estão incluídas.",
 ];
+

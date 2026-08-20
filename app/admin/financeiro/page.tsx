@@ -1,8 +1,7 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { listarLojas, listarMontadores, listarMontagens, porId } from "@/lib/db";
 import { Badge, Button, Card, Field, Input, PageHeader, Select, StatCard, Vazio } from "@/components/ui";
 import { formatarData, formatarMoeda } from "@/lib/format";
-import type { Prisma } from "@/app/generated/prisma/client";
 
 function mesAtual() {
   const agora = new Date();
@@ -23,23 +22,28 @@ export default async function FinanceiroPage({
   const inicio = new Date(ano, (mesNumero || 1) - 1, 1);
   const fim = new Date(ano, mesNumero || 1, 1);
 
-  const [lojas, montadores] = await Promise.all([
-    prisma.loja.findMany({ orderBy: { nome: "asc" } }),
-    prisma.user.findMany({ where: { role: "MONTADOR" }, orderBy: { nome: "asc" } }),
+  const [lojas, montadores, todasMontagens] = await Promise.all([
+    listarLojas(),
+    listarMontadores(),
+    listarMontagens(),
   ]);
 
-  const where: Prisma.MontagemWhereInput = {
-    status: { not: "CANCELADO" },
-    createdAt: { gte: inicio, lt: fim },
-  };
-  if (lojaId) where.lojaId = lojaId;
-  if (montadorId) where.montadorId = montadorId;
+  const lojasPorId = porId(lojas);
+  const montadoresPorId = porId(montadores);
 
-  const montagens = await prisma.montagem.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    include: { loja: true, montador: true },
-  });
+  const montagens = todasMontagens
+    .filter((m) => {
+      if (m.status === "CANCELADO") return false;
+      if (m.createdAt < inicio || m.createdAt >= fim) return false;
+      if (lojaId && m.lojaId !== lojaId) return false;
+      if (montadorId && m.montadorId !== montadorId) return false;
+      return true;
+    })
+    .map((m) => ({
+      ...m,
+      loja: lojasPorId.get(m.lojaId) ?? null,
+      montador: m.montadorId ? montadoresPorId.get(m.montadorId) ?? null : null,
+    }));
 
   const totalServico = montagens.reduce((soma, m) => soma + (m.valorServico * 0.08) + (m.valorAssistencia || 0), 0);
   const totalMontador = montagens.reduce((soma, m) => soma + m.valorMontador, 0);
@@ -146,7 +150,9 @@ export default async function FinanceiroPage({
                       {m.clienteNome}
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{m.loja.nome}</td>
+                  <td className="px-4 py-3 text-slate-600">
+                    {m.loja?.nome ?? "-"}
+                  </td>
                   <td className="px-4 py-3 text-slate-600">{m.montador?.nome ?? "-"}</td>
                   <td className="px-4 py-3 text-right text-slate-900">
                     {formatarMoeda(m.valorServico)}

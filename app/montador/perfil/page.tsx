@@ -1,5 +1,12 @@
 import { requireMontador } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import {
+  buscarUsuario,
+  listarAvaliacoesDoMontador,
+  listarComissoesDoMontador,
+  listarLojas,
+  listarMontagensDoMontador,
+  resumirAvaliacoes,
+} from "@/lib/db";
 import { atualizarPerfilAction } from "@/lib/actions/perfil";
 import { Alerta, Card, LinkButton, PageHeader, Vazio } from "@/components/ui";
 import { PerfilMontadorForm } from "@/components/PerfilMontadorForm";
@@ -18,37 +25,27 @@ export default async function PerfilMontadorPage({
   inicioMes.setDate(1);
   inicioMes.setHours(0, 0, 0, 0);
 
-  const [usuario, lojas, comissoes, ganhoMesAgg, avaliacaoAgg, avaliacoesRecentes] =
-    await Promise.all([
-      prisma.user.findUnique({ where: { id: session.sub } }),
-      prisma.loja.findMany({ where: { ativo: true }, orderBy: { nome: "asc" } }),
-      prisma.comissaoLoja.findMany({ where: { montadorId: session.sub } }),
-      prisma.montagem.aggregate({
-        _sum: { valorMontador: true },
-        where: {
-          montadorId: session.sub,
-          status: "CONCLUIDO",
-          concluidoEm: { gte: inicioMes },
-        },
-      }),
-      prisma.avaliacao.aggregate({
-        _avg: { estrelas: true },
-        _count: { _all: true },
-        where: { montadorId: session.sub },
-      }),
-      prisma.avaliacao.findMany({
-        where: { montadorId: session.sub },
-        orderBy: { criadoEm: "desc" },
-        take: 10,
-        include: { montagem: { select: { clienteNome: true } } },
-      }),
-    ]);
+  const [usuario, todasLojas, comissoes, montagens, avaliacoes] = await Promise.all([
+    buscarUsuario(session.sub),
+    listarLojas(),
+    listarComissoesDoMontador(session.sub),
+    listarMontagensDoMontador(session.sub),
+    listarAvaliacoesDoMontador(session.sub),
+  ]);
 
   if (!usuario) return null;
 
+  const lojas = todasLojas.filter((l) => l.ativo);
   const comissaoPorLoja = new Map(comissoes.map((c) => [c.lojaId, c.percentual]));
-  const mediaAvaliacao = avaliacaoAgg._avg.estrelas ?? 0;
-  const totalAvaliacoes = avaliacaoAgg._count._all;
+  const { media: mediaAvaliacao, total: totalAvaliacoes } = resumirAvaliacoes(avaliacoes);
+  const avaliacoesRecentes = avaliacoes.slice(0, 10);
+  const clientePorMontagem = new Map(montagens.map((m) => [m.id, m.clienteNome]));
+
+  const ganhoMes = montagens
+    .filter(
+      (m) => m.status === "CONCLUIDO" && m.concluidoEm && m.concluidoEm >= inicioMes
+    )
+    .reduce((soma, m) => soma + m.valorMontador, 0);
 
   return (
     <div>
@@ -74,7 +71,7 @@ export default async function PerfilMontadorPage({
           <div>
             <p className="text-sm font-medium text-slate-500">Ganho este mês</p>
             <p className="mt-1 text-2xl font-bold text-slate-900">
-              {formatarMoeda(ganhoMesAgg._sum.valorMontador)}
+              {formatarMoeda(ganhoMes)}
             </p>
           </div>
           <LinkButton href="/montador/financeiro" variante="secundario">
@@ -109,7 +106,7 @@ export default async function PerfilMontadorPage({
                   <div className="flex items-center gap-2">
                     <Estrelas valor={a.estrelas} tamanho="text-sm" />
                     <span className="text-sm font-medium text-slate-700">
-                      {a.montagem.clienteNome}
+                      {clientePorMontagem.get(a.montagemId) ?? "Cliente"}
                     </span>
                   </div>
                   <span className="text-xs text-slate-400">{formatarData(a.criadoEm)}</span>

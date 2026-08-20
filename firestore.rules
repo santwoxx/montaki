@@ -1,0 +1,28 @@
+rules_version = '2';
+
+// Regras de segurança do Cloud Firestore.
+// Administradores autorizados: pedrobmcity@gmail.com e brisasofc@gmail.com
+//
+// O backend Next.js (Admin SDK) opera com privilégios de conta de serviço no servidor
+// e não é afetado por estas regras. No entanto, o acesso direto autenticado pelo
+// navegador fica expressamente liberado para os administradores autorizados e
+// bloqueado para usuários anônimos ou não autorizados.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Função que confere se o usuário autenticado é um dos administradores oficiais
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.token.email == 'pedrobmcity@gmail.com' ||
+        request.auth.token.email == 'brisasofc@gmail.com'
+      );
+    }
+
+    // Regra global: permite leitura e escrita para administradores autorizados
+    match /{document=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
+

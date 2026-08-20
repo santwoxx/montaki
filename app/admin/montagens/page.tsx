@@ -1,8 +1,12 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
-import { Badge, Button, Card, LinkButton, PageHeader, Select, Vazio } from "@/components/ui";
-import { formatarData, formatarMoeda, STATUS_COLOR, STATUS_LABEL } from "@/lib/format";
-import type { Prisma, StatusMontagem } from "@/app/generated/prisma/client";
+import {
+  contarOcorrenciasPorMontagem,
+  listarLojas,
+  listarMontadores,
+  listarMontagens,
+  porId,
+} from "@/lib/db";
+import { Button, Card, LinkButton, PageHeader, Select } from "@/components/ui";
 import MontagensListClient from "./MontagensListClient";
 
 export default async function MontagensPage({
@@ -16,22 +20,42 @@ export default async function MontagensPage({
 }) {
   const { status, lojaId, montadorId } = await searchParams;
 
-  const [lojas, montadores] = await Promise.all([
-    prisma.loja.findMany({ orderBy: { nome: "asc" } }),
-    prisma.user.findMany({ where: { role: "MONTADOR" }, orderBy: { nome: "asc" } }),
-  ]);
+  const [lojas, montadores, todasMontagens, ocorrenciasPorMontagem] =
+    await Promise.all([
+      listarLojas(),
+      listarMontadores(),
+      listarMontagens(),
+      contarOcorrenciasPorMontagem(),
+    ]);
 
-  const where: Prisma.MontagemWhereInput = {};
-  if (status) where.status = status as StatusMontagem;
-  if (lojaId) where.lojaId = lojaId;
-  if (montadorId) where.montadorId = montadorId === "nenhum" ? null : montadorId;
+  const lojasPorId = porId(lojas);
+  const montadoresPorId = porId(montadores);
 
-  const montagens = await prisma.montagem.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    include: { loja: true, montador: true, _count: { select: { ocorrencias: true } } },
-    take: 100,
-  });
+  const montagens = todasMontagens
+    .filter((m) => {
+      if (status && m.status !== status) return false;
+      if (lojaId && m.lojaId !== lojaId) return false;
+      if (montadorId === "nenhum" && m.montadorId) return false;
+      if (montadorId && montadorId !== "nenhum" && m.montadorId !== montadorId) {
+        return false;
+      }
+      return true;
+    })
+    .slice(0, 100)
+    .map((m) => ({
+      id: m.id,
+      clienteNome: m.clienteNome,
+      feitoPorAdm: m.feitoPorAdm,
+      dataAgendada: m.dataAgendada,
+      valorServico: m.valorServico,
+      status: m.status,
+      pagoPelaLoja: m.pagoPelaLoja,
+      loja: { nome: lojasPorId.get(m.lojaId)?.nome ?? "Loja removida" },
+      montador: m.montadorId
+        ? { nome: montadoresPorId.get(m.montadorId)?.nome ?? "Montador removido" }
+        : null,
+      _count: { ocorrencias: ocorrenciasPorMontagem.get(m.id) ?? 0 },
+    }));
 
   return (
     <div>

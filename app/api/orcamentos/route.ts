@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { COLECOES, buscarMontagens, criarDocumento } from "@/lib/db";
+import { firestore } from "@/lib/firebase/admin";
+import { getSession } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
+  // Gerar orçamento expõe dados de clientes e valores das montagens
+  // escolhidas: é ação de administrador. Antes esta rota respondia a
+  // qualquer um que soubesse o endereço.
+  const session = await getSession();
+  if (!session || session.role !== "ADMIN") {
+    return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+  }
+
   try {
     const { montagensIds } = await req.json();
 
@@ -12,12 +22,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Buscar as montagens no banco para calcular o valor total
-    const montagens = await prisma.montagem.findMany({
-      where: {
-        id: { in: montagensIds },
-      },
-    });
+    const montagens = await buscarMontagens(montagensIds);
 
     if (montagens.length !== montagensIds.length) {
       return NextResponse.json(
@@ -34,19 +39,28 @@ export async function POST(req: NextRequest) {
     const cliente = montagens[0].clienteNome;
     const telefone = montagens[0].clienteTelefone;
 
-    // Cria o orçamento e vincula as montagens
-    const orcamento = await prisma.orcamento.create({
-      data: {
-        total,
-        cliente,
-        telefone,
-        montagens: {
-          connect: montagensIds.map((id) => ({ id })),
-        },
-      },
+    const orcamentoId = await criarDocumento(COLECOES.orcamentos, {
+      total,
+      cliente,
+      telefone,
+      status: "PENDENTE",
+      criadoEm: new Date(),
+      validoAte: null,
     });
 
-    return NextResponse.json({ orcamentoId: orcamento.id }, { status: 201 });
+    // Vincula as montagens ao orçamento -- o "connect" do Prisma. Num lote
+    // só, para não sobrar montagem apontando para um orçamento pela metade.
+    const db = firestore();
+    const lote = db.batch();
+    for (const montagem of montagens) {
+      lote.update(db.collection(COLECOES.montagens).doc(montagem.id), {
+        orcamentoId,
+        updatedAt: new Date(),
+      });
+    }
+    await lote.commit();
+
+    return NextResponse.json({ orcamentoId }, { status: 201 });
   } catch (error) {
     console.error("Erro ao criar orçamento:", error);
     return NextResponse.json(

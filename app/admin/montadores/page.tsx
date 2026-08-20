@@ -1,7 +1,12 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import {
+  listarMontadores,
+  listarMontagens,
+  resumirAvaliacoesPorMontador,
+} from "@/lib/db";
 import { criarMontadorAction } from "@/lib/actions/montadores";
-import { Alerta, Badge, Card, Field, Input, PageHeader, Vazio } from "@/components/ui";
+import { VINCULO_LABEL } from "@/lib/tipos";
+import { Alerta, Badge, Card, Field, Input, PageHeader, Select, Vazio } from "@/components/ui";
 import { Estrelas } from "@/components/Estrelas";
 import { Avatar } from "@/components/Avatar";
 import { SubmitButton } from "@/components/SubmitButton";
@@ -13,40 +18,40 @@ export default async function MontadoresPage({
 }) {
   const { erro, sucesso } = await searchParams;
 
-  const [montadores, avaliacoesAgrupadas] = await Promise.all([
-    prisma.user.findMany({
-      where: { role: "MONTADOR" },
-      orderBy: { createdAt: "desc" },
-      include: {
-        _count: { select: { montagens: true } },
-      },
-    }),
-    prisma.avaliacao.groupBy({
-      by: ["montadorId"],
-      _avg: { estrelas: true },
-      _count: { _all: true },
-    }),
+  const [equipe, montagens, avaliacaoPorMontador] = await Promise.all([
+    listarMontadores(),
+    listarMontagens(),
+    resumirAvaliacoesPorMontador(),
   ]);
 
-  const avaliacaoPorMontador = new Map(
-    avaliacoesAgrupadas.map((a) => [
-      a.montadorId,
-      { media: a._avg.estrelas ?? 0, total: a._count._all },
-    ])
+  const montagensPorMontador = new Map<string, number>();
+  for (const montagem of montagens) {
+    if (!montagem.montadorId) continue;
+    montagensPorMontador.set(
+      montagem.montadorId,
+      (montagensPorMontador.get(montagem.montadorId) ?? 0) + 1
+    );
+  }
+
+  // Mais recentes primeiro, como na listagem anterior.
+  const montadores = [...equipe].sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
   );
 
   return (
     <div>
       <PageHeader
-        titulo="Montadores"
-        descricao="Cadastre os montadores da sua equipe e gerencie seus acessos."
+        titulo="Equipe"
+        descricao="Cadastre funcionários e colaboradores e gerencie o acesso de cada um."
       />
 
       {erro ? <Alerta tipo="erro">{erro}</Alerta> : null}
       {sucesso ? <Alerta tipo="sucesso">{sucesso}</Alerta> : null}
 
       <Card className="mb-8">
-        <h2 className="mb-4 text-base font-semibold text-slate-900">Novo montador</h2>
+        <h2 className="mb-4 text-base font-semibold text-slate-900">
+          Novo funcionário ou colaborador
+        </h2>
         <form action={criarMontadorAction} className="grid gap-4 sm:grid-cols-2">
           <Field label="Nome completo">
             <Input name="nome" required placeholder="Ex: João da Silva" />
@@ -60,13 +65,20 @@ export default async function MontadoresPage({
           <Field label="Senha provisória" hint="Mínimo de 6 caracteres.">
             <Input type="text" name="senha" required minLength={6} placeholder="Ex: monta123" />
           </Field>
+          <Field
+            label="Vínculo"
+            hint="Só organiza a equipe — os dois entram com e-mail e senha e veem o mesmo painel."
+          >
+            <Select name="vinculo" defaultValue="FUNCIONARIO">
+              <option value="FUNCIONARIO">Funcionário</option>
+              <option value="COLABORADOR">Colaborador</option>
+            </Select>
+          </Field>
+          <Field label="Comissão Padrão (%)" hint="Usada caso não haja comissão definida para uma loja específica.">
+            <Input type="number" name="comissao" min={0} max={100} step="0.5" defaultValue={0} placeholder="Ex: 10" />
+          </Field>
           <div className="sm:col-span-2">
-            <Field label="Comissão Padrão (%)" hint="Usada caso não haja comissão definida para uma loja específica.">
-              <Input type="number" name="comissao" min={0} max={100} step="0.5" defaultValue={0} placeholder="Ex: 10" />
-            </Field>
-          </div>
-          <div className="sm:col-span-2">
-            <SubmitButton pendingText="Cadastrando…">Cadastrar montador</SubmitButton>
+            <SubmitButton pendingText="Cadastrando…">Cadastrar na equipe</SubmitButton>
           </div>
         </form>
       </Card>
@@ -76,7 +88,7 @@ export default async function MontadoresPage({
       </h2>
 
       {montadores.length === 0 ? (
-        <Vazio>Nenhum montador cadastrado ainda.</Vazio>
+        <Vazio>Nenhum funcionário ou colaborador cadastrado ainda.</Vazio>
       ) : (
         <div className="space-y-3">
           {montadores.map((m) => {
@@ -108,8 +120,13 @@ export default async function MontadoresPage({
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      {m.vinculo ? (
+                        <Badge className="bg-navy/5 text-navy">
+                          {VINCULO_LABEL[m.vinculo]}
+                        </Badge>
+                      ) : null}
                       <span className="text-xs text-slate-400">
-                        {m._count.montagens} montagem(ns)
+                        {montagensPorMontador.get(m.id) ?? 0} montagem(ns)
                       </span>
                       <Badge
                         className={

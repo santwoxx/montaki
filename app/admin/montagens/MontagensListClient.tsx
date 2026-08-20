@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Badge, Button, Card, Vazio } from "@/components/ui";
 import { formatarData, formatarMoeda, STATUS_COLOR, STATUS_LABEL } from "@/lib/format";
+import type { StatusMontagem } from "@/lib/tipos";
 
 type Montagem = {
   id: string;
@@ -12,7 +13,7 @@ type Montagem = {
   feitoPorAdm: boolean;
   dataAgendada: Date | null;
   valorServico: number;
-  status: any;
+  status: StatusMontagem;
   pagoPelaLoja: boolean;
   loja: { nome: string };
   montador: { nome: string } | null;

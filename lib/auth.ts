@@ -1,9 +1,13 @@
+import "server-only";
+
 import { cache } from "react";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+import { buscarUsuario } from "@/lib/db";
+import { autenticacaoAdmin } from "@/lib/firebase/admin";
+import type { Papel } from "@/lib/tipos";
 
 export const COOKIE_NAME = "sessao";
 
@@ -15,7 +19,7 @@ const secret = new TextEncoder().encode(
   process.env.SESSION_SECRET || "chave-de-desenvolvimento-insegura-troque-isso"
 );
 
-export type Papel = "ADMIN" | "MONTADOR";
+export type { Papel };
 
 export type SessionPayload = {
   sub: string;
@@ -31,6 +35,10 @@ export async function verifyPassword(senha: string, hash: string) {
   return bcrypt.compare(senha, hash);
 }
 
+// A sessão é um JWT próprio (não o cookie de sessão do Firebase) por dois
+// motivos: o proxy.ts consegue conferir o cookie sozinho, sem chamar o
+// Firebase a cada navegação, e o login por senha da equipe -- que não passa
+// pelo Firebase Auth -- usa exatamente o mesmo caminho do login do admin.
 export async function createSession(payload: SessionPayload) {
   const token = await new SignJWT({ role: payload.role, nome: payload.nome })
     .setProtectedHeader({ alg: "HS256" })
@@ -91,5 +99,52 @@ export async function requireMontador(): Promise<SessionPayload> {
 export const getCurrentUser = cache(async () => {
   const session = await getSession();
   if (!session) return null;
-  return prisma.user.findUnique({ where: { id: session.sub } });
+  return buscarUsuario(session.sub);
 });
+
+export type ContaGoogle = {
+  uid: string;
+  email: string;
+  nome: string | null;
+  fotoUrl: string | null;
+};
+
+/**
+ * Confere um ID token vindo do login com o Google no navegador.
+ *
+ * Além da assinatura (que o Admin SDK valida), exige duas coisas:
+ *
+ * - que o login tenha sido *pelo Google* (`sign_in_provider`). Sem isso,
+ *   qualquer outro método de login que venha a ser habilitado no projeto do
+ *   Firebase -- e-mail/senha, por exemplo -- viraria um caminho alternativo
+ *   para entrar como administrador, bastando cadastrar uma conta com o
+ *   e-mail dele.
+ * - que o e-mail seja verificado, já que é ele (e não o uid) que liga a
+ *   conta do Google ao usuário administrador cadastrado no sistema.
+ *
+ * Devolve `null` em qualquer caso duvidoso -- quem chama trata como login
+ * recusado.
+ */
+export async function verificarContaGoogle(
+  idToken: string
+): Promise<ContaGoogle | null> {
+  if (!idToken) return null;
+
+  try {
+    const token = await autenticacaoAdmin().verifyIdToken(idToken, true);
+    if (token.firebase?.sign_in_provider !== "google.com") return null;
+    if (token.email_verified !== true) return null;
+    const email = typeof token.email === "string" ? token.email.toLowerCase() : "";
+    if (!email) return null;
+
+    return {
+      uid: token.uid,
+      email,
+      nome: typeof token.name === "string" ? token.name : null,
+      fotoUrl: typeof token.picture === "string" ? token.picture : null,
+    };
+  } catch (error) {
+    console.error("Falha ao conferir o login com o Google:", error);
+    return null;
+  }
+}

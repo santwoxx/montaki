@@ -1,6 +1,4 @@
-import { loginAction } from "@/lib/actions/auth";
-import { Alerta, Field, Input } from "@/components/ui";
-import { SubmitButton } from "@/components/SubmitButton";
+import { LoginForm } from "@/components/LoginForm";
 import { Logo } from "@/components/Logo";
 
 export default async function LoginPage({
@@ -94,38 +92,10 @@ export default async function LoginPage({
 
           <div className="mb-6 text-center hidden lg:block">
             <h2 className="text-2xl font-bold font-display text-navy">Acessar Sistema</h2>
-            <p className="text-sm text-slate-500 mt-1">Entre com suas credenciais</p>
+            <p className="text-sm text-slate-500 mt-1">Escolha como você entra</p>
           </div>
 
-          <div className="rounded-3xl border border-slate-200/60 bg-white p-8 shadow-xl shadow-navy/5">
-            {erro ? <Alerta tipo="erro">{erro}</Alerta> : null}
-
-            <form action={loginAction} className="space-y-4">
-              {proximo ? <input type="hidden" name="proximo" value={proximo} /> : null}
-              <Field label="E-mail">
-                <Input
-                  type="email"
-                  name="email"
-                  placeholder="seu@email.com"
-                  autoComplete="email"
-                  autoFocus
-                  required
-                />
-              </Field>
-              <Field label="Senha">
-                <Input
-                  type="password"
-                  name="senha"
-                  placeholder="••••••••"
-                  autoComplete="current-password"
-                  required
-                />
-              </Field>
-              <SubmitButton className="w-full text-base py-3" pendingText="Entrando…">
-                Entrar
-              </SubmitButton>
-            </form>
-          </div>
+          <LoginForm erro={erro} proximo={proximo} />
         </div>
       </div>
     </div>

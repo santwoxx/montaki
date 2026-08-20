@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { COLECOES, criarDocumento, listarMontadores } from "@/lib/db";
 import { normalizarCnpj } from "@/lib/cnpj";
 
 // Endpoint público chamado por um sistema externo (outro sistema seu, sem
@@ -113,31 +113,32 @@ export async function POST(request: Request) {
     if (!Number.isNaN(parsed.getTime())) dataAgendada = parsed;
   }
 
-  let montadorSugeridoId: string | undefined;
+  let montadorSugeridoId: string | null = null;
   if (montadorSugeridoNome) {
-    const montador = await prisma.user.findFirst({
-      where: { role: "MONTADOR", ativo: true, nome: { equals: montadorSugeridoNome, mode: "insensitive" } },
-      select: { id: true },
-    });
-    montadorSugeridoId = montador?.id;
+    // O Firestore não compara texto ignorando maiúsculas/minúsculas, e a
+    // equipe é pequena: a comparação é feita aqui, sobre a lista já
+    // carregada.
+    const alvo = montadorSugeridoNome.toLowerCase();
+    const montadores = await listarMontadores();
+    const montador = montadores.find((m) => m.ativo && m.nome.toLowerCase() === alvo);
+    montadorSugeridoId = montador?.id ?? null;
   }
 
-  const notaPendente = await prisma.notaPendente.create({
-    data: {
-      numeroPedido,
-      clienteNome,
-      clienteTelefone,
-      clienteEndereco,
-      descricaoServico,
-      valorServico,
-      dataAgendada,
-      observacoes,
-      fotoReferenciaUrl,
-      montadorSugeridoId,
-      lojaNomeSugerida,
-      lojaCnpjSugerido,
-    },
+  const id = await criarDocumento(COLECOES.notasPendentes, {
+    numeroPedido: numeroPedido ?? null,
+    clienteNome,
+    clienteTelefone: clienteTelefone ?? null,
+    clienteEndereco,
+    descricaoServico,
+    valorServico: valorServico ?? null,
+    dataAgendada: dataAgendada ?? null,
+    observacoes: observacoes ?? null,
+    fotoReferenciaUrl: fotoReferenciaUrl ?? null,
+    montadorSugeridoId,
+    lojaNomeSugerida: lojaNomeSugerida ?? null,
+    lojaCnpjSugerido: lojaCnpjSugerido ?? null,
+    criadaEm: new Date(),
   });
 
-  return jsonResponse(201, { ok: true, id: notaPendente.id });
+  return jsonResponse(201, { ok: true, id });
 }

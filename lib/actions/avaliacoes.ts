@@ -2,22 +2,16 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
-import { prisma } from "@/lib/prisma";
+import {
+  COLECOES,
+  atualizarMontagem,
+  buscarAvaliacaoDaMontagem,
+  buscarMontagem,
+  criarDocumentoExclusivo,
+} from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { apenasDigitos } from "@/lib/format";
-
-async function obterUrlBase() {
-  const configurada = process.env.NEXT_PUBLIC_APP_URL;
-  if (configurada) return configurada.replace(/\/+$/, "");
-
-  const cabecalhos = await headers();
-  const host = cabecalhos.get("host") ?? "localhost:3000";
-  const proto =
-    cabecalhos.get("x-forwarded-proto") ??
-    (host.startsWith("localhost") ? "http" : "https");
-  return `${proto}://${host}`;
-}
+import { obterUrlBase } from "@/lib/urlBase";
 
 /**
  * Gera o link de avaliação e a mensagem de WhatsApp para o cliente, e
@@ -30,7 +24,7 @@ export async function gerarLinkAvaliacaoAction(
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const montagem = await prisma.montagem.findUnique({ where: { id } });
+  const montagem = await buscarMontagem(id);
   if (!montagem) return { ok: false, erro: "Montagem não encontrada." };
   if (session.role === "MONTADOR" && montagem.montadorId !== session.sub) {
     return { ok: false, erro: "Você não tem acesso a esta montagem." };
@@ -51,10 +45,7 @@ export async function gerarLinkAvaliacaoAction(
   const baseUrl = await obterUrlBase();
   const linkAvaliacao = `${baseUrl}/avaliar/${montagem.id}`;
 
-  await prisma.montagem.update({
-    where: { id },
-    data: { avaliacaoSolicitadaEm: new Date() },
-  });
+  await atualizarMontagem(id, { avaliacaoSolicitadaEm: new Date() });
 
   revalidatePath(`/montador/montagens/${id}`);
   revalidatePath(`/admin/montagens/${id}`);
@@ -82,15 +73,13 @@ export async function enviarAvaliacaoAction(id: string, formData: FormData) {
   const erro = (mensagem: string) =>
     redirect(`/avaliar/${id}?erro=${encodeURIComponent(mensagem)}`);
 
-  const montagem = await prisma.montagem.findUnique({ where: { id } });
+  const montagem = await buscarMontagem(id);
   if (!montagem || montagem.status !== "CONCLUIDO" || !montagem.montadorId) {
     erro("Este link de avaliação não está mais disponível.");
     return;
   }
 
-  const jaAvaliada = await prisma.avaliacao.findUnique({
-    where: { montagemId: id },
-  });
+  const jaAvaliada = await buscarAvaliacaoDaMontagem(id);
   if (jaAvaliada) {
     redirect(`/avaliar/${id}`);
     return;
@@ -109,12 +98,18 @@ export async function enviarAvaliacaoAction(id: string, formData: FormData) {
   const montadorId = montagem.montadorId;
 
   try {
-    await prisma.avaliacao.create({
-      data: { montagemId: id, montadorId, estrelas, comentario },
+    // O id do documento é o id da montagem: uma avaliação por montagem, e a
+    // segunda tentativa falha aqui em vez de sobrescrever a primeira.
+    await criarDocumentoExclusivo(COLECOES.avaliacoes, id, {
+      montagemId: id,
+      montadorId,
+      estrelas,
+      comentario,
+      criadoEm: new Date(),
     });
   } catch {
-    // Duas tentativas quase simultâneas: a restrição única já garantiu que
-    // só uma avaliação foi criada. Segue para a tela de agradecimento.
+    // Duas tentativas quase simultâneas: a primeira já gravou. Segue para a
+    // tela de agradecimento.
   }
 
   revalidatePath(`/admin/montadores/${montadorId}`);

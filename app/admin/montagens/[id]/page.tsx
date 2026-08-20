@@ -1,6 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { prisma } from "@/lib/prisma";
+import {
+  buscarAvaliacaoDaMontagem,
+  buscarMontagem,
+  buscarUsuario,
+  listarComissoes,
+  listarLojas,
+  listarMontadores,
+  listarOcorrenciasDaMontagem,
+} from "@/lib/db";
 import {
   atualizarMontagemAction,
   alternarPagamentoLojaAction,
@@ -35,17 +43,19 @@ export default async function MontagemDetalhePage({
   const { id } = await params;
   const { erro, sucesso } = await searchParams;
 
-  const [montagem, lojas, montadores, comissoes] = await Promise.all([
-    prisma.montagem.findUnique({
-      where: { id },
-      include: { avaliacao: true, ocorrencias: { orderBy: { criadoEm: "desc" } }, montador: true },
-    }),
-    prisma.loja.findMany({ orderBy: { nome: "asc" } }),
-    prisma.user.findMany({ where: { role: "MONTADOR" }, orderBy: { nome: "asc" } }),
-    prisma.comissaoLoja.findMany(),
-  ]);
+  const [montagem, lojas, montadores, comissoes, ocorrencias, avaliacao] =
+    await Promise.all([
+      buscarMontagem(id),
+      listarLojas(),
+      listarMontadores(),
+      listarComissoes(),
+      listarOcorrenciasDaMontagem(id),
+      buscarAvaliacaoDaMontagem(id),
+    ]);
 
   if (!montagem) notFound();
+
+  const montador = montagem.montadorId ? await buscarUsuario(montagem.montadorId) : null;
 
   return (
     <div>
@@ -166,7 +176,7 @@ export default async function MontagemDetalhePage({
             <>
               <p className="mt-1 mb-3 text-sm text-slate-500">
                 Esse pedido veio de um sistema externo e já foi concluído aqui
-                {montagem.montador ? ` por ${montagem.montador.nome}` : ""}. Confirme
+                {montador ? ` por ${montador.nome}` : ""}. Confirme
                 para enviar a foto e as assinaturas de volta pra lá.
               </p>
               <form action={confirmarEnvioIntegracaoExternaAction.bind(null, montagem.id)}>
@@ -186,17 +196,17 @@ export default async function MontagemDetalhePage({
       {montagem.status === "CONCLUIDO" ? (
         <Card className="mb-6">
           <p className="mb-1 text-sm font-medium text-slate-500">Avaliação do cliente</p>
-          {montagem.avaliacao ? (
+          {avaliacao ? (
             <div>
               <div className="mt-2 flex items-center gap-2">
-                <Estrelas valor={montagem.avaliacao.estrelas} tamanho="text-xl" />
+                <Estrelas valor={avaliacao.estrelas} tamanho="text-xl" />
                 <span className="text-sm text-slate-500">
-                  {montagem.avaliacao.estrelas} de 5 · {formatarData(montagem.avaliacao.criadoEm)}
+                  {avaliacao.estrelas} de 5 · {formatarData(avaliacao.criadoEm)}
                 </span>
               </div>
-              {montagem.avaliacao.comentario ? (
+              {avaliacao.comentario ? (
                 <p className="mt-2 text-sm text-slate-700">
-                  &ldquo;{montagem.avaliacao.comentario}&rdquo;
+                  &ldquo;{avaliacao.comentario}&rdquo;
                 </p>
               ) : null}
             </div>
@@ -212,13 +222,13 @@ export default async function MontagemDetalhePage({
         </Card>
       ) : null}
 
-      {montagem.ocorrencias.length > 0 ? (
+      {ocorrencias.length > 0 ? (
         <Card className="mb-6 border-amber-100">
           <p className="mb-3 text-sm font-medium text-slate-500">
             Histórico de ocorrências
           </p>
           <div className="space-y-3">
-            {montagem.ocorrencias.map((o) => (
+            {ocorrencias.map((o) => (
               <div key={o.id} className="rounded-lg border border-slate-100 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <Badge className={OCORRENCIA_COLOR[o.tipo]}>

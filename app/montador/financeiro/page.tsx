@@ -1,8 +1,7 @@
 import { requireMontador } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { listarLojas, listarMontagensDoMontador, ordenarPor, porId } from "@/lib/db";
 import { Badge, Card, Field, Input, PageHeader, Select, StatCard, Vazio } from "@/components/ui";
 import { formatarData, formatarMoeda } from "@/lib/format";
-import type { Prisma } from "@/app/generated/prisma/client";
 
 function mesAtual() {
   const agora = new Date();
@@ -21,57 +20,52 @@ export default async function FinanceiroMontadorPage({
   const inicio = new Date(ano, (mesNumero || 1) - 1, 1);
   const fim = new Date(ano, mesNumero || 1, 1);
 
-  const concluidasBase: Prisma.MontagemWhereInput = {
-    montadorId: session.sub,
-    status: "CONCLUIDO",
-    ...(lojaId ? { lojaId } : {}),
-  };
-
-  const [
-    lojas,
-    pendenteAgg,
-    recebidoAgg,
-    periodoAgg,
-    periodoCount,
-    pendentePorLojaBruto,
-    historico,
-  ] = await Promise.all([
-    prisma.loja.findMany({ orderBy: { nome: "asc" } }),
-    prisma.montagem.aggregate({
-      _sum: { valorMontador: true },
-      where: { ...concluidasBase, pagoAoMontador: false },
-    }),
-    prisma.montagem.aggregate({
-      _sum: { valorMontador: true },
-      where: { ...concluidasBase, pagoAoMontador: true },
-    }),
-    prisma.montagem.aggregate({
-      _sum: { valorMontador: true },
-      where: { ...concluidasBase, concluidoEm: { gte: inicio, lt: fim } },
-    }),
-    prisma.montagem.count({
-      where: { ...concluidasBase, concluidoEm: { gte: inicio, lt: fim } },
-    }),
-    lojaId
-      ? Promise.resolve([])
-      : prisma.montagem.groupBy({
-          by: ["lojaId"],
-          where: { montadorId: session.sub, status: "CONCLUIDO", pagoAoMontador: false },
-          _sum: { valorMontador: true },
-        }),
-    prisma.montagem.findMany({
-      where: { ...concluidasBase, concluidoEm: { gte: inicio, lt: fim } },
-      orderBy: { concluidoEm: "desc" },
-      include: { loja: true },
-    }),
+  const [lojas, montagens] = await Promise.all([
+    listarLojas(),
+    listarMontagensDoMontador(session.sub),
   ]);
+
+  // Base de tudo nesta tela: montagens concluídas do montador, já filtradas
+  // pela loja escolhida (quando houver).
+  const concluidas = montagens.filter(
+    (m) => m.status === "CONCLUIDO" && (!lojaId || m.lojaId === lojaId)
+  );
+  const noPeriodo = concluidas.filter(
+    (m) => m.concluidoEm && m.concluidoEm >= inicio && m.concluidoEm < fim
+  );
+
+  const somar = (lista: typeof concluidas) =>
+    lista.reduce((soma, m) => soma + m.valorMontador, 0);
+
+  const pendente = somar(concluidas.filter((m) => !m.pagoAoMontador));
+  const recebido = somar(concluidas.filter((m) => m.pagoAoMontador));
+  const ganhoNoPeriodo = somar(noPeriodo);
+  const periodoCount = noPeriodo.length;
+
+  const lojasPorId = porId(lojas);
+  const historico = ordenarPor(noPeriodo, ["concluidoEm", "desc"]).map((m) => ({
+    ...m,
+    loja: lojasPorId.get(m.lojaId) ?? null,
+  }));
+
+  // "Quem te deve": só faz sentido quando a visão não está presa a uma loja.
+  const pendentePorLojaBruto = lojaId
+    ? []
+    : [
+        ...montagens
+          .filter((m) => m.status === "CONCLUIDO" && !m.pagoAoMontador)
+          .reduce((mapa, m) => {
+            mapa.set(m.lojaId, (mapa.get(m.lojaId) ?? 0) + m.valorMontador);
+            return mapa;
+          }, new Map<string, number>()),
+      ].map(([lojaIdItem, valor]) => ({ lojaId: lojaIdItem, valor }));
 
   const nomeLoja = new Map(lojas.map((l) => [l.id, l.nome]));
   const pendentePorLoja = pendentePorLojaBruto
     .map((item) => ({
       lojaId: item.lojaId,
       nome: nomeLoja.get(item.lojaId) ?? "Loja",
-      valor: item._sum.valorMontador ?? 0,
+      valor: item.valor,
     }))
     .filter((item) => item.valor > 0)
     .sort((a, b) => b.valor - a.valor);
@@ -112,14 +106,14 @@ export default async function FinanceiroMontadorPage({
       <div className="mb-6 grid grid-cols-1 gap-4 min-[420px]:grid-cols-2">
         <StatCard
           titulo="Pendente de receber"
-          valor={formatarMoeda(pendenteAgg._sum.valorMontador)}
+          valor={formatarMoeda(pendente)}
           sub="Concluídas, aguardando pagamento"
           cor="text-amber-600"
           icone="⏳"
         />
         <StatCard
           titulo="Já recebido"
-          valor={formatarMoeda(recebidoAgg._sum.valorMontador)}
+          valor={formatarMoeda(recebido)}
           sub="Total pago até hoje"
           cor="text-emerald-600"
           icone="✅"
@@ -146,7 +140,7 @@ export default async function FinanceiroMontadorPage({
       <div className="mb-8 grid grid-cols-1 gap-4 min-[420px]:grid-cols-2">
         <StatCard
           titulo="Ganho no período"
-          valor={formatarMoeda(periodoAgg._sum.valorMontador)}
+          valor={formatarMoeda(ganhoNoPeriodo)}
           icone="📈"
         />
         <StatCard titulo="Montagens concluídas" valor={String(periodoCount)} icone="📋" />
@@ -165,7 +159,9 @@ export default async function FinanceiroMontadorPage({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="font-semibold text-slate-900">{m.clienteNome}</p>
-                  <p className="text-sm text-slate-500">{m.loja.nome}</p>
+                  <p className="text-sm text-slate-500">
+                    {m.loja?.nome ?? "Loja removida"}
+                  </p>
                   <p className="text-xs text-slate-400">
                     Concluída em {formatarData(m.concluidoEm)}
                   </p>

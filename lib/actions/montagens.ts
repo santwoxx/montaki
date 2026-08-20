@@ -3,10 +3,22 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { put } from "@vercel/blob";
-import { prisma } from "@/lib/prisma";
+import {
+  COLECOES,
+  atualizarMontagem,
+  buscarMontagem,
+  buscarNotaPendente,
+  buscarUsuario,
+  criarDocumento,
+  listarOcorrenciasDaMontagem,
+  removerDocumento,
+  removerVarios,
+} from "@/lib/db";
+import { firestore } from "@/lib/firebase/admin";
 import { getSession, requireAdmin } from "@/lib/auth";
 import { paraNumeroBr } from "@/lib/format";
 import { pareceIdDeIntegracaoExterna } from "@/lib/integracaoExterna";
+import type { StatusMontagem } from "@/lib/tipos";
 
 function paraNumero(valor: FormDataEntryValue | null, padrao = 0) {
   const numero = paraNumeroBr(String(valor ?? ""));
@@ -91,13 +103,7 @@ export async function criarMontagemAction(formData: FormData) {
   // integrado) e o admin não anexou um manual próprio, usa a foto de
   // referência do produto que veio junto com a nota como manual/instrução
   // da montagem.
-  let notaPendente: { fotoReferenciaUrl: string | null } | null = null;
-  if (notaPendenteId) {
-    notaPendente = await prisma.notaPendente.findUnique({
-      where: { id: notaPendenteId },
-      select: { fotoReferenciaUrl: true },
-    });
-  }
+  const notaPendente = notaPendenteId ? await buscarNotaPendente(notaPendenteId) : null;
   if (!manualDados && notaPendente?.fotoReferenciaUrl) {
     manualDados = {
       manualUrl: notaPendente.fotoReferenciaUrl,
@@ -107,38 +113,52 @@ export async function criarMontagemAction(formData: FormData) {
   }
 
   const valorMontador = arredondar((valorServico * percentualMontador) / 100);
+  const agora = new Date();
 
-  const montagem = await prisma.montagem.create({
-    data: {
-      lojaId,
-      montadorId,
-      clienteNome,
-      clienteTelefone: clienteTelefone || null,
-      clienteEndereco,
-      numeroPedido: numeroPedido || null,
-      descricaoServico,
-      observacoes: observacoes || null,
-      valorServico,
-      valorAssistencia,
-      percentualMontador,
-      valorMontador,
-      feitoPorAdm,
-      dataAgendada,
-      ...manualDados,
-    },
+  const montagemId = await criarDocumento(COLECOES.montagens, {
+    lojaId,
+    montadorId,
+    clienteNome,
+    clienteTelefone: clienteTelefone || null,
+    clienteEndereco,
+    numeroPedido: numeroPedido || null,
+    descricaoServico,
+    observacoes: observacoes || null,
+    valorServico,
+    valorAssistencia,
+    percentualMontador,
+    valorMontador,
+    feitoPorAdm,
+    dataAgendada,
+    status: "PENDENTE" satisfies StatusMontagem,
+    pagoPelaLoja: false,
+    pagoAoMontador: false,
+    concluidoEm: null,
+    fotoProdutoUrl: null,
+    assinaturaMontador: null,
+    assinaturaCliente: null,
+    manualUrl: null,
+    manualNomeArquivo: null,
+    manualTipo: null,
+    notificadoCentralSyncEm: null,
+    avaliacaoSolicitadaEm: null,
+    orcamentoId: null,
+    createdAt: agora,
+    updatedAt: agora,
+    ...manualDados,
   });
 
   // Some com a nota pendente agora que virou uma montagem de verdade —
   // melhor esforço, não impede a criação se falhar.
   if (notaPendenteId) {
-    await prisma.notaPendente.delete({ where: { id: notaPendenteId } }).catch(() => {});
+    await removerDocumento(COLECOES.notasPendentes, notaPendenteId).catch(() => {});
   }
 
   revalidatePath("/admin/montagens");
   revalidatePath("/admin");
   revalidatePath("/montador");
   redirect(
-    `/admin/montagens/${montagem.id}?sucesso=${encodeURIComponent(
+    `/admin/montagens/${montagemId}?sucesso=${encodeURIComponent(
       "Montagem criada com sucesso."
     )}`
   );
@@ -158,11 +178,7 @@ export async function atualizarMontagemAction(id: string, formData: FormData) {
   const numeroPedido = String(formData.get("numeroPedido") || "").trim();
   const descricaoServico = String(formData.get("descricaoServico") || "").trim();
   const observacoes = String(formData.get("observacoes") || "").trim();
-  const status = String(formData.get("status") || "PENDENTE") as
-    | "PENDENTE"
-    | "EM_ANDAMENTO"
-    | "CONCLUIDO"
-    | "CANCELADO";
+  const status = String(formData.get("status") || "PENDENTE") as StatusMontagem;
 
   const valorServico = arredondar(paraNumero(formData.get("valorServico")));
   const valorAssistencia = arredondar(paraNumero(formData.get("valorAssistencia")));
@@ -181,31 +197,28 @@ export async function atualizarMontagemAction(id: string, formData: FormData) {
 
   const valorMontador = arredondar((valorServico * percentualMontador) / 100);
 
-  const atual = await prisma.montagem.findUnique({ where: { id } });
+  const atual = await buscarMontagem(id);
   const concluidoEm =
     status === "CONCLUIDO" ? atual?.concluidoEm ?? new Date() : null;
 
-  await prisma.montagem.update({
-    where: { id },
-    data: {
-      lojaId,
-      montadorId,
-      clienteNome,
-      clienteTelefone: clienteTelefone || null,
-      clienteEndereco,
-      numeroPedido: numeroPedido || null,
-      descricaoServico,
-      observacoes: observacoes || null,
-      valorServico,
-      valorAssistencia,
-      ...manualDados,
-      percentualMontador,
-      valorMontador,
-      feitoPorAdm,
-      dataAgendada,
-      status,
-      concluidoEm,
-    },
+  await atualizarMontagem(id, {
+    lojaId,
+    montadorId,
+    clienteNome,
+    clienteTelefone: clienteTelefone || null,
+    clienteEndereco,
+    numeroPedido: numeroPedido || null,
+    descricaoServico,
+    observacoes: observacoes || null,
+    valorServico,
+    valorAssistencia,
+    ...manualDados,
+    percentualMontador,
+    valorMontador,
+    feitoPorAdm,
+    dataAgendada,
+    status,
+    concluidoEm,
   });
 
   revalidatePath("/admin/montagens");
@@ -224,14 +237,14 @@ async function podeGerenciar(montagemId: string) {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const montagem = await prisma.montagem.findUnique({ where: { id: montagemId } });
+  const montagem = await buscarMontagem(montagemId);
   if (!montagem) redirect(session.role === "ADMIN" ? "/admin/montagens" : "/montador");
 
   if (session.role === "MONTADOR" && montagem.montadorId !== session.sub) {
     redirect("/montador");
   }
 
-  return { session, montagem: montagem! };
+  return { session, montagem };
 }
 
 function caminhoDetalhe(role: "ADMIN" | "MONTADOR", id: string) {
@@ -251,9 +264,9 @@ export async function atualizarClienteMontadorAction(id: string, formData: FormD
     );
   }
 
-  await prisma.montagem.update({
-    where: { id },
-    data: { clienteEndereco, clienteTelefone: clienteTelefone || null },
+  await atualizarMontagem(id, {
+    clienteEndereco,
+    clienteTelefone: clienteTelefone || null,
   });
 
   revalidatePath("/admin/montagens");
@@ -265,18 +278,12 @@ export async function atualizarClienteMontadorAction(id: string, formData: FormD
   );
 }
 
-export async function atualizarStatusAction(
-  id: string,
-  novoStatus: "PENDENTE" | "EM_ANDAMENTO" | "CONCLUIDO" | "CANCELADO"
-) {
+export async function atualizarStatusAction(id: string, novoStatus: StatusMontagem) {
   const { session } = await podeGerenciar(id);
 
-  await prisma.montagem.update({
-    where: { id },
-    data: {
-      status: novoStatus,
-      concluidoEm: novoStatus === "CONCLUIDO" ? new Date() : null,
-    },
+  await atualizarMontagem(id, {
+    status: novoStatus,
+    concluidoEm: novoStatus === "CONCLUIDO" ? new Date() : null,
   });
 
   revalidatePath("/admin/montagens");
@@ -340,10 +347,7 @@ export async function concluirComProvaAction(id: string, formData: FormData) {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const montagem = await prisma.montagem.findUnique({
-    where: { id },
-    include: { montador: { select: { nome: true } } },
-  });
+  const montagem = await buscarMontagem(id);
   if (!montagem) redirect("/montador");
   if (session.role !== "MONTADOR" || montagem.montadorId !== session.sub) {
     redirect("/montador");
@@ -385,15 +389,12 @@ export async function concluirComProvaAction(id: string, formData: FormData) {
     addRandomSuffix: true,
   });
 
-  await prisma.montagem.update({
-    where: { id },
-    data: {
-      status: "CONCLUIDO",
-      concluidoEm: new Date(),
-      fotoProdutoUrl: blob.url,
-      assinaturaMontador,
-      assinaturaCliente,
-    },
+  await atualizarMontagem(id, {
+    status: "CONCLUIDO" satisfies StatusMontagem,
+    concluidoEm: new Date(),
+    fotoProdutoUrl: blob.url,
+    assinaturaMontador,
+    assinaturaCliente,
   });
 
   // Não avisa o sistema externo aqui, mesmo que a montagem tenha vindo de lá
@@ -415,10 +416,7 @@ export async function concluirComProvaAction(id: string, formData: FormData) {
 export async function confirmarEnvioIntegracaoExternaAction(id: string) {
   await requireAdmin();
 
-  const montagem = await prisma.montagem.findUnique({
-    where: { id },
-    include: { montador: { select: { nome: true } } },
-  });
+  const montagem = await buscarMontagem(id);
   if (!montagem) redirect("/admin/montagens");
 
   if (!pareceIdDeIntegracaoExterna(montagem.numeroPedido)) {
@@ -432,9 +430,11 @@ export async function confirmarEnvioIntegracaoExternaAction(id: string) {
     );
   }
 
+  const montador = montagem.montadorId ? await buscarUsuario(montagem.montadorId) : null;
+
   const sucesso = await avisarIntegracaoExterna(
     montagem.numeroPedido,
-    montagem.montador?.nome ?? null,
+    montador?.nome ?? null,
     montagem.assinaturaMontador ?? "",
     montagem.assinaturaCliente ?? "",
     montagem.fotoProdutoUrl ?? ""
@@ -448,10 +448,7 @@ export async function confirmarEnvioIntegracaoExternaAction(id: string) {
     );
   }
 
-  await prisma.montagem.update({
-    where: { id },
-    data: { notificadoCentralSyncEm: new Date() },
-  });
+  await atualizarMontagem(id, { notificadoCentralSyncEm: new Date() });
 
   revalidatePath(`/admin/montagens/${id}`);
   revalidatePath("/admin");
@@ -466,7 +463,7 @@ export async function registrarOcorrenciaAction(id: string, formData: FormData) 
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const montagem = await prisma.montagem.findUnique({ where: { id } });
+  const montagem = await buscarMontagem(id);
   if (!montagem) redirect("/montador");
   if (session.role !== "MONTADOR" || montagem.montadorId !== session.sub) {
     redirect("/montador");
@@ -483,7 +480,7 @@ export async function registrarOcorrenciaAction(id: string, formData: FormData) 
   const tipo = tipoBruto as (typeof TIPOS_OCORRENCIA)[number];
   const observacao = String(formData.get("observacao") || "").trim();
 
-  let fotoUrl: string | undefined;
+  let fotoUrl: string | null = null;
   const foto = formData.get("foto");
   if (foto instanceof File && foto.size > 0) {
     if (!foto.type.startsWith("image/")) {
@@ -502,15 +499,23 @@ export async function registrarOcorrenciaAction(id: string, formData: FormData) 
     fotoUrl = blob.url;
   }
 
-  await prisma.$transaction([
-    prisma.ocorrencia.create({
-      data: { montagemId: id, tipo, observacao: observacao || null, fotoUrl },
-    }),
-    prisma.montagem.update({
-      where: { id },
-      data: { status: "PENDENTE" },
-    }),
-  ]);
+  // Registrar a ocorrência e devolver a montagem para "pendente" precisa
+  // acontecer junto: um lote garante que não sobre uma ocorrência sem o
+  // status correspondente (era a transação do Postgres).
+  const db = firestore();
+  const lote = db.batch();
+  lote.set(db.collection(COLECOES.ocorrencias).doc(), {
+    montagemId: id,
+    tipo,
+    observacao: observacao || null,
+    fotoUrl,
+    criadoEm: new Date(),
+  });
+  lote.update(db.collection(COLECOES.montagens).doc(id), {
+    status: "PENDENTE" satisfies StatusMontagem,
+    updatedAt: new Date(),
+  });
+  await lote.commit();
 
   revalidatePath("/admin/montagens");
   revalidatePath("/montador");
@@ -525,13 +530,10 @@ export async function registrarOcorrenciaAction(id: string, formData: FormData) 
 
 export async function alternarPagamentoLojaAction(id: string) {
   await requireAdmin();
-  const montagem = await prisma.montagem.findUnique({ where: { id } });
+  const montagem = await buscarMontagem(id);
   if (!montagem) redirect("/admin/montagens");
 
-  await prisma.montagem.update({
-    where: { id },
-    data: { pagoPelaLoja: !montagem!.pagoPelaLoja },
-  });
+  await atualizarMontagem(id, { pagoPelaLoja: !montagem.pagoPelaLoja });
 
   revalidatePath(`/admin/montagens/${id}`);
   revalidatePath("/admin/financeiro");
@@ -541,13 +543,10 @@ export async function alternarPagamentoLojaAction(id: string) {
 
 export async function alternarPagamentoMontadorAction(id: string) {
   await requireAdmin();
-  const montagem = await prisma.montagem.findUnique({ where: { id } });
+  const montagem = await buscarMontagem(id);
   if (!montagem) redirect("/admin/montagens");
 
-  await prisma.montagem.update({
-    where: { id },
-    data: { pagoAoMontador: !montagem!.pagoAoMontador },
-  });
+  await atualizarMontagem(id, { pagoAoMontador: !montagem.pagoAoMontador });
 
   revalidatePath(`/admin/montagens/${id}`);
   revalidatePath("/admin/financeiro");
@@ -565,11 +564,22 @@ export async function alternarPagamentoMontadorAction(id: string) {
 export async function excluirMontagemAction(id: string) {
   await requireAdmin();
 
-  await prisma.montagem.delete({ where: { id } });
+  // O Postgres apagava em cascata o que dependia da montagem; aqui isso é
+  // explícito, senão sobrariam ocorrências e avaliação órfãs ocupando
+  // espaço e contando nas médias dos montadores.
+  const ocorrencias = await listarOcorrenciasDaMontagem(id);
+  await removerVarios(
+    COLECOES.ocorrencias,
+    ocorrencias.map((o) => o.id)
+  );
+  // A avaliação é gravada com o mesmo id da montagem.
+  await removerDocumento(COLECOES.avaliacoes, id).catch(() => {});
+  await removerDocumento(COLECOES.montagens, id);
 
   revalidatePath("/admin/montagens");
   revalidatePath("/admin/financeiro");
   revalidatePath("/admin");
+  revalidatePath("/admin/montadores");
   revalidatePath("/montador");
   revalidatePath("/montador/financeiro");
   redirect(

@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { put } from "@vercel/blob";
-import { prisma } from "@/lib/prisma";
+import { COLECOES, atualizarDocumento } from "@/lib/db";
 import { createSession, requireMontador } from "@/lib/auth";
 
 export async function atualizarPerfilAction(formData: FormData) {
@@ -39,13 +39,10 @@ export async function atualizarPerfilAction(formData: FormData) {
     fotoUrl = blob.url;
   }
 
-  await prisma.user.update({
-    where: { id: session.sub },
-    data: {
-      nome,
-      telefone: telefone || null,
-      ...(fotoUrl ? { fotoUrl } : {}),
-    },
+  await atualizarDocumento(COLECOES.usuarios, session.sub, {
+    nome,
+    telefone: telefone || null,
+    ...(fotoUrl ? { fotoUrl } : {}),
   });
 
   // O cookie de sessão guarda o nome desde o login; atualiza para refletir

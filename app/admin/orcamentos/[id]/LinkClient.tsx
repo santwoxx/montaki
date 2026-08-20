@@ -1,26 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui";
 
-export default function LinkClient({ orcamentoId }: { orcamentoId: string }) {
-  const [link, setLink] = useState("");
+// O link chega pronto do servidor (ver lib/urlBase.ts): montar aqui com
+// window.location obrigaria a renderizar uma vez sem link para não quebrar
+// a hidratação.
+export default function LinkClient({ link }: { link: string }) {
   const [copiado, setCopiado] = useState(false);
 
-  useEffect(() => {
-    // Generate the full URL only on the client to get the correct origin
-    setLink(`${window.location.origin}/orcamento/${orcamentoId}`);
-  }, [orcamentoId]);
-
   const handleCopy = () => {
-    if (link) {
-      navigator.clipboard.writeText(link);
-      setCopiado(true);
-      setTimeout(() => setCopiado(false), 2000);
-    }
+    navigator.clipboard.writeText(link);
+    setCopiado(true);
+    setTimeout(() => setCopiado(false), 2000);
   };
-
-  if (!link) return null;
 
   return (
     <div className="space-y-3">

@@ -2,8 +2,8 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
-import { hashPassword, requireAdmin } from "@/lib/auth";
+import { adminAuth, adminDb } from "@/lib/firebase-admin";
+import { requireAdmin } from "@/lib/auth";
 import { paraNumeroBr } from "@/lib/format";
 
 export async function criarMontadorAction(formData: FormData) {
@@ -14,6 +14,7 @@ export async function criarMontadorAction(formData: FormData) {
   const telefone = String(formData.get("telefone") || "").trim();
   const senha = String(formData.get("senha") || "");
   let comissao = paraNumeroBr(formData.get("comissao")?.toString() || "0");
+  
   if (!Number.isFinite(comissao) || comissao < 0) comissao = 0;
   if (comissao > 100) comissao = 100;
 
@@ -30,27 +31,38 @@ export async function criarMontadorAction(formData: FormData) {
     );
   }
 
-  const existente = await prisma.user.findUnique({ where: { email } });
-  if (existente) {
-    redirect(
-      `/admin/montadores?erro=${encodeURIComponent(
-        "Já existe um usuário cadastrado com este e-mail."
-      )}`
-    );
-  }
+  try {
+    // 1. Criar o usuário no Firebase Auth
+    const userRecord = await adminAuth.createUser({
+      email,
+      password: senha,
+      displayName: nome,
+    });
 
-  const senhaHash = await hashPassword(senha);
-
-  await prisma.user.create({
-    data: {
+    // 2. Salvar os metadados do usuário no Firestore
+    await adminDb.collection("users").doc(userRecord.uid).set({
       nome,
       email,
       telefone: telefone || null,
-      senha: senhaHash,
       role: "MONTADOR",
       comissaoPadrao: comissao,
-    },
-  });
+      ativo: true,
+      createdAt: new Date(),
+    });
+
+  } catch (error: any) {
+    if (error.code === 'auth/email-already-exists') {
+      redirect(
+        `/admin/montadores?erro=${encodeURIComponent(
+          "Já existe um usuário cadastrado com este e-mail no Firebase."
+        )}`
+      );
+    }
+    console.error("Erro ao criar montador:", error);
+    redirect(
+      `/admin/montadores?erro=${encodeURIComponent("Erro ao criar usuário no sistema.")}`
+    );
+  }
 
   revalidatePath("/admin/montadores");
   redirect(
@@ -89,28 +101,37 @@ export async function atualizarMontadorAction(id: string, formData: FormData) {
     );
   }
 
-  const emailEmUso = await prisma.user.findFirst({
-    where: { email, NOT: { id } },
-  });
-  if (emailEmUso) {
-    redirect(
-      `/admin/montadores/${id}?erro=${encodeURIComponent(
-        "Este e-mail já está em uso por outro usuário."
-      )}`
-    );
-  }
+  try {
+    // Atualiza auth se o email ou senha mudarem, e gerencia status ativo
+    const updateData: any = {
+      email,
+      displayName: nome,
+      disabled: !ativo
+    };
+    if (novaSenha) {
+      updateData.password = novaSenha;
+    }
+    await adminAuth.updateUser(id, updateData);
 
-  await prisma.user.update({
-    where: { id },
-    data: {
+    // Atualiza metadados no Firestore
+    await adminDb.collection("users").doc(id).update({
       nome,
       email,
       telefone: telefone || null,
       ativo,
       comissaoPadrao,
-      ...(novaSenha ? { senha: await hashPassword(novaSenha) } : {}),
-    },
-  });
+    });
+  } catch (error: any) {
+    if (error.code === 'auth/email-already-exists') {
+      redirect(
+        `/admin/montadores/${id}?erro=${encodeURIComponent(
+          "Este e-mail já está em uso por outro usuário."
+        )}`
+      );
+    }
+    console.error(error);
+    redirect(`/admin/montadores/${id}?erro=${encodeURIComponent("Erro interno ao atualizar.")}`);
+  }
 
   revalidatePath("/admin/montadores");
   revalidatePath(`/admin/montadores/${id}`);
@@ -122,25 +143,25 @@ export async function atualizarMontadorAction(id: string, formData: FormData) {
 export async function salvarComissoesAction(montadorId: string, formData: FormData) {
   await requireAdmin();
 
-  const lojas = await prisma.loja.findMany({ select: { id: true } });
+  const lojasSnapshot = await adminDb.collection("lojas").get();
 
-  await prisma.$transaction(
-    lojas.map((loja) => {
-      const bruto = String(formData.get(`percentual_${loja.id}`) || "0").replace(
-        ",",
-        "."
-      );
-      let percentual = Number(bruto);
-      if (!Number.isFinite(percentual) || percentual < 0) percentual = 0;
-      if (percentual > 100) percentual = 100;
+  const batch = adminDb.batch();
 
-      return prisma.comissaoLoja.upsert({
-        where: { montadorId_lojaId: { montadorId, lojaId: loja.id } },
-        update: { percentual },
-        create: { montadorId, lojaId: loja.id, percentual },
-      });
-    })
-  );
+  lojasSnapshot.docs.forEach((lojaDoc) => {
+    const bruto = String(formData.get(`percentual_${lojaDoc.id}`) || "0").replace(",", ".");
+    let percentual = Number(bruto);
+    if (!Number.isFinite(percentual) || percentual < 0) percentual = 0;
+    if (percentual > 100) percentual = 100;
+
+    const comissaoRef = adminDb.collection("comissoesLoja").doc(`${montadorId}_${lojaDoc.id}`);
+    batch.set(comissaoRef, {
+      montadorId,
+      lojaId: lojaDoc.id,
+      percentual
+    });
+  });
+
+  await batch.commit();
 
   revalidatePath(`/admin/montadores/${montadorId}`);
   redirect(
@@ -154,17 +175,17 @@ export async function excluirMontadorAction(id: string) {
   await requireAdmin();
 
   try {
-    await prisma.user.delete({ where: { id } });
+    // Excluir do Firestore
+    await adminDb.collection("users").doc(id).delete();
+    // Excluir do Firebase Auth
+    await adminAuth.deleteUser(id);
   } catch (error) {
-    const codigo = (error as { code?: string })?.code;
-    if (codigo === "P2003" || codigo === "P2014") {
-      redirect(
-        `/admin/montadores?erro=${encodeURIComponent(
-          "Esse montador já tem avaliações registradas e não pode ser excluído. Desative-o em vez disso."
-        )}`
-      );
-    }
-    throw error;
+    console.error(error);
+    redirect(
+      `/admin/montadores?erro=${encodeURIComponent(
+        "Erro ao excluir montador."
+      )}`
+    );
   }
 
   revalidatePath("/admin/montadores");

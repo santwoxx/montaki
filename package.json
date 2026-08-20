@@ -39,5 +39,12 @@
     "tailwindcss": "^4",
     "tsx": "^4.23.11",
     "typescript": "^5"
+  },
+  "allowScripts": {
+    "@firebase/util@1.15.3": true,
+    "esbuild@0.28.2": true,
+    "protobufjs@7.6.5": true,
+    "tesseract.js@7.0.0": true,
+    "unrs-resolver@1.12.2": true
   }
 }
